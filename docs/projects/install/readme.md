@@ -345,10 +345,14 @@ Debian and Ubuntu package names on Linux, plus a line for what no
 package covers, such as Node 24, which Debian and Ubuntu package too
 old. For pnpm on Linux that line is `corepack enable pnpm` only where
 `corepack` is on PATH, because Node 25 and newer ship without Corepack
-(nodejs/node#57617), and pnpm's installation page otherwise. It checks
-Xcode's command line tools on macOS through
-`xcode-select -p`, never by running `/usr/bin/c++` or `/usr/bin/git`,
-which open an install dialog when the tools are absent. On Linux it
+(nodejs/node#57617), and pnpm's installation page otherwise. A missing
+CMake gets the `cmake` package, unless `apt-cache` says apt-get would
+install one older than 3.24, as Ubuntu 22.04 and Debian 11 would. Then
+it gets the cmake.org line an old CMake gets, so the next run does not
+reject what the first one installed. It checks Xcode's command line
+tools on macOS through `xcode-select -p`, never by running
+`/usr/bin/c++` or `/usr/bin/git`, which open an install dialog when the
+tools are absent. On Linux it
 checks for a C++ compiler, git, and through `pkg-config` the modules of
 the headers `ci.yml` installs. It installs nothing itself.
 

@@ -553,6 +553,29 @@ posix('install.sh before it changes anything', () => {
     expect(run.stderr).toContain('apt-get install -y pkg-config libasound2-dev');
   });
 
+  // Ubuntu 22.04 packages CMake 3.22 and Debian 11 3.18, so the cmake
+  // package there installs one the next run rejects as too old.
+  it('names cmake.org on Linux for a missing CMake when apt-get would install one too old', () => {
+    rmSync(join(bin, 'cmake'));
+    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
+    write(join(bin, 'apt-cache'), `#!${BASH}\nprintf 'cmake:\\n  Installed: (none)\\n  Candidate: 3.22.1-1ubuntu1\\n'\n`, 0o755);
+    const run = install('audiod', { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('needs CMake 3.24 or newer, and apt-get would install 3.22.1');
+    expect(run.stderr).toContain('  # CMake 3.24 or newer, from https://cmake.org/download/\n');
+    expect(run.stderr).not.toContain('apt-get install');
+  });
+
+  it('names the cmake package on Linux when apt-get would install a new enough one', () => {
+    rmSync(join(bin, 'cmake'));
+    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
+    write(join(bin, 'apt-cache'), `#!${BASH}\nprintf 'cmake:\\n  Installed: (none)\\n  Candidate: 3.28.3-1build7\\n'\n`, 0o755);
+    const run = install('audiod', { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  sudo apt-get install -y cmake\n');
+    expect(run.stderr).not.toContain('cmake.org');
+  });
+
   it('checks for no headers on macOS, where JUCE uses the system frameworks', () => {
     rmSync(join(bin, 'pkg-config'));
     expect(install('audiod', { FAKE_UNAME: 'Darwin' }).status).toBe(0);

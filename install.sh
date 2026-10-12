@@ -166,10 +166,27 @@ check_pnpm() {
   need pnpm-missing "Field builds with pnpm" pnpm "" "$step"
 }
 
+# The CMake version apt-get would install, or nothing without apt-cache or
+# a candidate. LC_ALL=C, because apt-cache translates "Candidate".
+apt_cmake() {
+  local candidate
+  command -v apt-cache >/dev/null 2>&1 || return 0
+  candidate="$(LC_ALL=C apt-cache policy cmake 2>/dev/null | sed -n 's/^ *Candidate: *//p')" || return 0
+  candidate="${candidate#*:}"
+  case "$candidate" in [0-9]*) printf '%s' "${candidate%%-*}" ;; esac
+}
+
+# Ubuntu 22.04 packages CMake 3.22 and Debian 11 3.18, so where apt-get
+# would install one too old, a missing CMake gets the step an old one does.
 check_cmake() {
-  local version
+  local version packaged=""
   if ! version="$(cmake_version)"; then
-    need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake ""
+    [ "$OS" = Darwin ] || packaged="$(apt_cmake)"
+    if [ -n "$packaged" ] && ! cmake_new_enough "$packaged"; then
+      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and apt-get would install $packaged" "" "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
+    else
+      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake ""
+    fi
   elif ! cmake_new_enough "$version"; then
     need cmake-old "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version" cmake "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
   fi

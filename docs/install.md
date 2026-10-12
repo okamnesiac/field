@@ -76,7 +76,11 @@ same packages with its package manager. `all` needs everything below,
   [pnpm's installation page](https://pnpm.io/installation) instead.
   For a checkout, also run `pnpm setup` once, then open a new shell, so
   pnpm has a global bin directory on your PATH to link `field` into.
-- **CMake 3.24 or newer**, for `field-audiod`.
+- **CMake 3.24 or newer**, for `field-audiod`. Ubuntu 22.04 and Debian
+  11 package an older one, so where `apt-cache` says `apt-get` would
+  install one older than 3.24, the installer points at
+  [cmake.org](https://cmake.org/download/) instead of the `cmake`
+  package.
 - **A C++20 compiler and git**, for `field-audiod`, whose build clones
   JUCE with git. On macOS, Xcode's command line tools hold both, and
   `xcode-select --install` installs them.
