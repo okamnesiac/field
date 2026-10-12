@@ -1,14 +1,9 @@
 import { NAMED_ROWS, type Keymap, type RowName } from '../schema/keymap.js';
 import { US_LABELS } from './position.js';
 
-// The keyboard `field keys` draws above the knob line (keys.md, "Play"):
-// the keys that play notes, as keycaps with their US labels, the key held
-// down in reverse video. The row above the home row sits half a key to the
-// left, so each of its keys sits between two home-row keys, as a piano's
-// black keys do, and a key that plays nothing leaves a gap. It draws a
-// keymap whose notes are all on those two rows, which `musical`'s are.
-
 const KEY_WIDTH = 4;
+// The top row sits half a key left of the home row, so each of its keys
+// falls between two home-row keys, as a piano's black keys do.
 const ROWS: readonly { name: RowName; offset: number }[] = [
   { name: 'top', offset: -KEY_WIDTH / 2 },
   { name: 'home', offset: 0 },

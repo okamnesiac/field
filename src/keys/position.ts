@@ -29,8 +29,6 @@ const US_POSITIONS: Record<string, string> = {
 for (const digit of '0123456789') US_POSITIONS[digit] = `Digit${digit}`;
 for (const letter of 'abcdefghijklmnopqrstuvwxyz') US_POSITIONS[letter] = `Key${letter.toUpperCase()}`;
 
-// What each text position's key is labelled on a US keyboard: `A` for
-// KeyA, `;` for Semicolon.
 export const US_LABELS: ReadonlyMap<string, string> = new Map(
   Object.entries(US_POSITIONS).map(([character, position]) => [position, character.toUpperCase()]),
 );
