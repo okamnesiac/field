@@ -157,9 +157,13 @@ check_node() {
     need node-old "Field needs Node $NODE_MAJOR or newer, and node is $version" node "" "# Node $NODE_MAJOR or newer, from https://nodejs.org/en/download"
 }
 
+# Node 25 and newer ship without corepack, so `corepack enable pnpm` is the
+# step only where corepack is on PATH.
 check_pnpm() {
-  command -v pnpm >/dev/null 2>&1 ||
-    need pnpm-missing "Field builds with pnpm" pnpm "" "corepack enable pnpm"
+  local step="# pnpm, from https://pnpm.io/installation"
+  command -v pnpm >/dev/null 2>&1 && return 0
+  if command -v corepack >/dev/null 2>&1; then step="corepack enable pnpm"; fi
+  need pnpm-missing "Field builds with pnpm" pnpm "" "$step"
 }
 
 check_cmake() {

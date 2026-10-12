@@ -71,9 +71,11 @@ same packages with its package manager. `all` needs everything below,
   from [nodejs.org](https://nodejs.org/en/download), because Debian and
   Ubuntu package an older one.
 - **pnpm.** On Linux, `corepack enable pnpm` installs the version
-  `package.json` names. For a checkout, also run `pnpm setup` once, then
-  open a new shell, so pnpm has a global bin directory on your PATH to
-  link `field` into.
+  `package.json` names. Node 25 and newer ship without Corepack, so
+  where `corepack` is not on your PATH, the installer points at
+  [pnpm's installation page](https://pnpm.io/installation) instead.
+  For a checkout, also run `pnpm setup` once, then open a new shell, so
+  pnpm has a global bin directory on your PATH to link `field` into.
 - **CMake 3.24 or newer**, for `field-audiod`.
 - **A C++20 compiler and git**, for `field-audiod`, whose build clones
   JUCE with git. On macOS, Xcode's command line tools hold both, and

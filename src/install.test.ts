@@ -461,11 +461,22 @@ posix('install.sh cli', () => {
     expect(run.log.some((line) => line.includes('install'))).toBe(false);
   });
 
-  it('names corepack on Linux when pnpm is missing', () => {
+  it('names corepack on Linux when pnpm is missing and Node has corepack', () => {
     rmSync(join(bin, 'pnpm'));
+    write(join(bin, 'corepack'), `#!${BASH}\n`, 0o755);
     const run = install('cli', { FAKE_UNAME: 'Linux' });
     expect(run.status).toBe(69);
     expect(run.stderr).toContain('  corepack enable pnpm\n');
+  });
+
+  // Node 25 and newer ship without corepack, so naming it there sends the
+  // reader to a command that is not found.
+  it("names pnpm's installation page on Linux when Node has no corepack", () => {
+    rmSync(join(bin, 'pnpm'));
+    const run = install('cli', { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  # pnpm, from https://pnpm.io/installation\n');
+    expect(run.stderr).not.toContain('corepack');
   });
 
   it('names Homebrew on macOS when pnpm is missing', () => {

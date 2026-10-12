@@ -343,7 +343,10 @@ tool with the commands that install them all: `xcode-select --install`
 and one `brew install` on macOS, and one `sudo apt-get install` with the
 Debian and Ubuntu package names on Linux, plus a line for what no
 package covers, such as Node 24, which Debian and Ubuntu package too
-old. It checks Xcode's command line tools on macOS through
+old. For pnpm on Linux that line is `corepack enable pnpm` only where
+`corepack` is on PATH, because Node 25 and newer ship without Corepack
+(nodejs/node#57617), and pnpm's installation page otherwise. It checks
+Xcode's command line tools on macOS through
 `xcode-select -p`, never by running `/usr/bin/c++` or `/usr/bin/git`,
 which open an install dialog when the tools are absent. On Linux it
 checks for a C++ compiler, git, and through `pkg-config` the modules of
