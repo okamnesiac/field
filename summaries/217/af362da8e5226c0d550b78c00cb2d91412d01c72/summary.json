@@ -1,0 +1,136 @@
+{
+ "version": 1,
+ "name": "Version line for releases",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 217,
+  "title": "Print only the version when field was not built from a checkout",
+  "head": "af362da8e5226c0d550b78c00cb2d91412d01c72",
+  "headRef": "quiet-version-outside-checkout",
+  "base": "6f28530dc4b06a162b38e66c14428754e070a25f",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field --version</code> tells you which build of the Field CLI is running. Its first line is the version from <code>package.json</code>, followed in parentheses by the Git commit the build came from, so that during development you can see whether the code you are running is the code in your checkout.",
+   "A <b>release install</b> is the other way to get Field: <code>install.sh</code> downloads GitHub's source archive of a version's tag, unpacks it into a directory of its own, and builds it there. That archive has no <code>.git</code>, so the build has no commit to name, and the first line read <code>field 0.3.0&nbsp; (not a git checkout)</code>. Release installs are now the usual install, so the parenthetical described the normal case as if something were missing.",
+   "This pull request makes two changes. The first prints the version alone when the build has no commit, and leaves a build from a checkout exactly as it was. The second, added after the first review, decides more strictly whether a build has a commit: the build script and the run-time read ask Git only when the package root has its own <code>.git</code>. Git searches upward from the directory it is asked about, so before this change a release unpacked inside another repository, such as a home directory kept in Git, reported that repository's commit as its own."
+  ],
+  "cards": [
+   {
+    "id": "cases",
+    "title": "What the first line prints for each build",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Build</th><th>First line at this head</th></tr></thead><tbody><tr><td>Release install, built from an archive with no <code>.git</code></td><td class=\"r\"><code>field 0.3.0</code> (was <code>field 0.3.0&nbsp; (not a git checkout)</code>)</td></tr><tr><td>Release unpacked inside another Git repository</td><td class=\"r\"><code>field 0.3.0</code> (was the outer repository's commit, such as <code>field 0.3.0&nbsp; (948b7e3 on main, 1 file uncommitted)</code>)</td></tr><tr><td>Checkout on a branch, clean</td><td class=\"r\"><code>field 0.3.0&nbsp; (6a310a4 on main)</code></td></tr><tr><td>Checkout with a detached HEAD</td><td class=\"r\"><code>field 0.3.0&nbsp; (af362da)</code></td></tr><tr><td>Checkout built with an uncommitted file</td><td class=\"r\"><code>field 0.3.0&nbsp; (af362da, 1 file uncommitted)</code></td></tr><tr><td>Checkout edited after the build</td><td class=\"r\"><code>field 0.3.0&nbsp; (af362da; checkout has changed since the build — field upgrade cli to update)</code></td></tr></tbody></table></div><p class=\"note\">Every row except the clean branch was run by the review against this head, the detached rows in a worktree whose <code>.git</code> is a file. Only the first two rows change.</p>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Build stamp</b>: <code>dist/build-info.json</code>, which <code>scripts/stamp-build.mjs</code> writes at the end of <code>pnpm build</code>. It holds the commit, branch, and count of uncommitted files the build saw, or <code>{}</code> when the build has no commit.</li><li><b>Checkout</b>: a Git clone or worktree of the repository, built in place. A clone has a <code>.git</code> directory at its root, and a worktree has a <code>.git</code> file.</li><li><b>Release install</b>: a version's source archive, unpacked and built by <code>install.sh</code>, with no <code>.git</code>.</li><li><b>Live read</b>: <code>liveIdentity</code> in <code>version.ts</code>, which asks Git for the checkout's commit when <code>field --version</code> runs, to compare with the stamp or to stand in for one.</li><li><b>Drift</b>: the checkout moving after the build, by a new commit or by edits, which <code>field --version</code> reports beside the stamped commit.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "version-line",
+   "title": "The first line of field --version",
+   "kicker": "The version alone when the build has no commit, and no commit borrowed from an outer repository",
+   "intro": [
+    "<code>formatVersionReport</code> turns the version report into the text <code>field --version</code> prints. Its first line is <code>field &lt;version&gt;</code>, plus a parenthetical describing the build's commit when there is one: the short commit, the branch unless HEAD is detached, the count of uncommitted files at build time, and any drift since. When the report carries no commit, the parenthetical used to say <code>not a git checkout</code>. It is now left out.",
+    "<code>liveIdentity</code>, the live read, now returns no commit unless the package root has its own <code>.git</code>. It is the fallback when a build's stamp has no commit, so without this check a release inside another repository would have found that repository's commit at run time even with an empty stamp. It also takes the root as an optional argument, which only the tests pass."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/version.ts",
+     "note": "<code>liveIdentity</code> checks for <code>.git</code> before asking Git and is exported for the tests; the formatter drops the parenthetical when there is no commit.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>install.sh</code> and <code>isCheckout</code> in <code>src/commands/upgrade.ts</code> already tell a checkout from a release by the same <code>.git</code> test, so the version report now agrees with them about which installs are checkouts.",
+       "line": 90
+      },
+      {
+       "kind": "verify",
+       "text": "An archive of this head built under a directory that is itself a Git repository printed <code>field 0.3.0</code>, and so did one built outside any repository. The checkout cases printed the forms in the overview's table.",
+       "line": 342
+      }
+     ]
+    },
+    {
+     "path": "src/commands/version.test.ts",
+     "collapsed": true,
+     "note": "Formatter cases with and without a commit, and a new <code>a release unpacked inside another repository</code> block that runs the real stamp script and <code>liveIdentity</code> in temporary repositories.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The review removed the <code>.git</code> check from <code>liveIdentity</code> alone, and the release case failed here; with the check removed from both places, it failed at the stamp. <code>windows</code> CI runs the clone and worktree case too, and passed.",
+       "line": 319
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "build-stamp",
+   "title": "How the build stamp finds its commit",
+   "kicker": "The stamp script asks Git only at a root with its own .git, and logs no phrase for a release",
+   "intro": [
+    "<code>scripts/stamp-build.mjs</code> runs at the end of <code>pnpm build</code>. It asks Git for the commit at the package root, writes the build stamp, and logs one line. It now asks only when the package root holds a <code>.git</code> entry, so an archive unpacked inside another repository stamps <code>{}</code>, as an archive anywhere else does.",
+    "The log line drops <code>not a git checkout</code> for a build with no commit. A release install builds twice, once from the <code>prepare</code> step of <code>pnpm install</code> and once from <code>pnpm run build</code>, so the old phrase appeared twice during every install. The stamp's JSON keeps its shape, so its two readers, <code>field --version</code> and the <code>report_build</code> check in <code>install.sh</code> that prints <code>cli-current</code> or <code>cli-stale</code>, read it as before."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "scripts/stamp-build.mjs",
+     "note": "The commit is read only when <code>.git</code> exists at the package root, and the log line names the short commit only when there is one.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "An archive of this head unpacked under a Git repository with a commit stamped <code>{}</code>. At the previous head, the same setup stamped the outer repository's commit. The review's own worktree, whose <code>.git</code> is a file, still stamped its commit.",
+       "line": 33
+      },
+      {
+       "kind": "verify",
+       "text": "Both archive builds logged <code>stamped dist/build-info.json</code> with nothing after it; a checkout build logged <code>stamped dist/build-info.json (af362da)</code>. A search of the repository found nothing that parses this line.",
+       "line": 44
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The documentation",
+   "kicker": "The command reference shows the release line, and the architecture notes describe the .git test",
+   "intro": [
+    "The command reference's example of <code>field --version</code> now shows a release install's output, with the checkout form given as an inline example. The architecture document's note on how <code>field --version</code> reports its build adds the <code>.git</code> test and why it exists."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/cli.md",
+     "note": "The example's first line becomes <code>field 0.3.0</code>, and the text says a build from a checkout adds its commit.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The example matches the archive build's output line for line. Its <code>remote</code> line is the form the formatter prints for the default remote with no login, and the inline checkout example uses the formatter's two spaces before the parenthesis.",
+       "line": 60
+      }
+     ]
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "One paragraph on why both the stamp and the live read ask Git only at a root with its own <code>.git</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Matches the code: both <code>scripts/stamp-build.mjs</code> and <code>liveIdentity</code> test <code>existsSync(join(root, '.git'))</code>, which accepts a clone's directory and a worktree's file.",
+       "line": 55
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

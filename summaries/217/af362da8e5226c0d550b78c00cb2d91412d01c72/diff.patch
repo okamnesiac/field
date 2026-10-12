@@ -1,0 +1,224 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+index d8bddb6..dadbc61 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -52,7 +52,11 @@ either stops legitimate work or trains you to expect red.
+ stamps `dist/build-info.json` with the commit, branch, and dirty count
+ at build time — cleared before `tsc`, written after everything
+ succeeds, so a failed build leaves no stamp — and the dist artifact
+-reads its stamp.
++reads its stamp. Both the stamp and the live read ask Git only when the
++package root has its own `.git`, a directory in a clone and a file in a
++worktree. A release, built from a source archive, has none, so it
++reports no commit even when it is unpacked inside another repository,
++whose commit Git would otherwise find by searching upward.
+ 
+ When the checkout has moved since the build, the report says so beside
+ the baked identity instead of impersonating it: a new HEAD prints
+diff --git a/docs/cli.md b/docs/cli.md
+index 37d4804..2dde89a 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -57,7 +57,7 @@ To see what you have, ask the version:
+ 
+ ```console
+ $ field --version
+-field 0.1.0  (6a310a4 on docs/cli)
++field 0.3.0
+ worker protocol 2
+ remote        https://audiofield.io (default)  not logged in
+ 
+@@ -67,8 +67,9 @@ daemons in .
+   field-voiced  not running
+ ```
+ 
+-The first line is the CLI build and the commit it came from, and it says
+-so when the checkout has moved on or carries uncommitted changes. The
++The first line is the CLI's version. A build from a checkout adds the
++commit it came from, as in `field 0.3.0  (6a310a4 on main)`, and says so
++when the checkout has moved on or carries uncommitted changes. The
+ `remote` line names the remote this project talks to, where that URL
+ came from, and whether you are logged in to it (see [Share a project
+ through a remote](#share-a-project-through-a-remote)). The rest reports
+diff --git a/scripts/stamp-build.mjs b/scripts/stamp-build.mjs
+index 5d20cfa..ff28af0 100644
+--- a/scripts/stamp-build.mjs
++++ b/scripts/stamp-build.mjs
+@@ -1,5 +1,5 @@
+ import { spawnSync } from 'node:child_process';
+-import { rmSync, writeFileSync } from 'node:fs';
++import { existsSync, rmSync, writeFileSync } from 'node:fs';
+ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ 
+@@ -25,9 +25,13 @@ const git = (args) => {
+ 
+ // Full sha: git lengthens --short prefixes as a repo grows, so equal
+ // objects can compare unequal as strings (Bugbot on #121). Display
+-// shortening is the formatter's, at read time.
+-const commit = git(['rev-parse', 'HEAD']);
+-const status = git(['status', '--porcelain']);
++// shortening is the formatter's, at read time. Asked only of a package
++// root with its own .git, a directory in a clone and a file in a
++// worktree, as install.sh tells a checkout from a release: Git searches
++// upward, so a release unpacked inside another repository would stamp
++// that repository's commit.
++const commit = existsSync(join(root, '.git')) ? git(['rev-parse', 'HEAD']) : undefined;
++const status = commit === undefined ? undefined : git(['status', '--porcelain']);
+ const info =
+   commit === undefined
+     ? {}
+@@ -37,4 +41,4 @@ const info =
+         dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
+       };
+ writeFileSync(stampPath, JSON.stringify(info, null, 2) + '\n');
+-process.stdout.write(`stamped dist/build-info.json (${info.commit?.slice(0, 7) ?? 'not a git checkout'})\n`);
++process.stdout.write(`stamped dist/build-info.json${info.commit ? ` (${info.commit.slice(0, 7)})` : ''}\n`);
+diff --git a/src/commands/version.test.ts b/src/commands/version.test.ts
+index 75a4761..87be66a 100644
+--- a/src/commands/version.test.ts
++++ b/src/commands/version.test.ts
+@@ -1,9 +1,18 @@
+-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
++import { spawnSync } from 'node:child_process';
++import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+ import { createServer, type Server } from 'node:net';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { dirname, join } from 'node:path';
++import { fileURLToPath } from 'node:url';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
++import {
++  formatRemoteReport,
++  formatVersionReport,
++  liveIdentity,
++  remoteReport,
++  versionReport,
++  resolveIdentity,
++} from './version.js';
+ import { BUILD_CLI } from '../remedies.js';
+ import { fileStore } from '../remote/credentials.js';
+ import { git } from '../git.js';
+@@ -250,6 +259,82 @@ describe('resolveIdentity', () => {
+   });
+ });
+ 
++describe('formatVersionReport for a release install', () => {
++  it('prints the version alone, with nothing about a checkout', () => {
++    // A release is built from GitHub's source archive, which carries no
++    // commit, and that is the install most people have.
++    const text = formatVersionReport(
++      {
++        cli: { version: '0.3.0' },
++        workerProtocol: 2,
++        daemons: [],
++        remote: { api: 'https://audiofield.io', source: 'default' },
++      },
++      process.cwd(),
++    );
++    expect(text.split('\n')[0]).toBe('field 0.3.0');
++  });
++
++  it('still names the commit for a build from a checkout', () => {
++    const text = formatVersionReport(
++      {
++        cli: { version: '0.3.0', commit: 'aaaa111', branch: 'main' },
++        workerProtocol: 2,
++        daemons: [],
++        remote: { api: 'https://audiofield.io', source: 'default' },
++      },
++      process.cwd(),
++    );
++    expect(text.split('\n')[0]).toBe('field 0.3.0  (aaaa111 on main)');
++  });
++});
++
++describe('a release unpacked inside another repository', () => {
++  // A release has no .git of its own, and Git searches upward from where
++  // it is asked, so a release under a home directory kept in Git, or
++  // under a FIELD_DATA_DIR inside a project, can find someone else's
++  // commit.
++  const stampScript = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'stamp-build.mjs');
++
++  function commitIn(dir: string): string {
++    git(['init', '-q'], { cwd: dir });
++    git(
++      ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'outer'],
++      { cwd: dir },
++    );
++    return git(['rev-parse', 'HEAD'], { cwd: dir });
++  }
++
++  // The real script, run from a copy, because it finds the package root
++  // from its own location.
++  function stamp(packageDir: string): { commit?: string } {
++    mkdirSync(join(packageDir, 'scripts'), { recursive: true });
++    mkdirSync(join(packageDir, 'dist'), { recursive: true });
++    copyFileSync(stampScript, join(packageDir, 'scripts', 'stamp-build.mjs'));
++    const run = spawnSync(process.execPath, [join(packageDir, 'scripts', 'stamp-build.mjs')], { encoding: 'utf8' });
++    expect(run.status).toBe(0);
++    return JSON.parse(readFileSync(join(packageDir, 'dist', 'build-info.json'), 'utf8')) as { commit?: string };
++  }
++
++  it("neither stamps nor reads the outer repository's commit", () => {
++    commitIn(root);
++    const release = join(root, '.local', 'share', 'field', '0.3.0');
++    mkdirSync(release, { recursive: true });
++    expect(stamp(release)).toEqual({});
++    expect(liveIdentity(release)).toEqual({});
++  });
++
++  it('still names the commit of a clone, and of a worktree whose .git is a file', () => {
++    const head = commitIn(root);
++    expect(stamp(root).commit).toBe(head);
++    expect(liveIdentity(root).commit).toBe(head);
++    const worktree = join(root, 'worktree');
++    git(['worktree', 'add', '-q', '--detach', worktree], { cwd: root });
++    expect(stamp(worktree).commit).toBe(head);
++    expect(liveIdentity(worktree).commit).toBe(head);
++  });
++});
++
+ describe('formatVersionReport with a drifted checkout', () => {
+   it('names both shas and the command that reconciles them', () => {
+     const text = formatVersionReport(
+diff --git a/src/commands/version.ts b/src/commands/version.ts
+index 6ad8186..786c577 100644
+--- a/src/commands/version.ts
++++ b/src/commands/version.ts
+@@ -83,8 +83,12 @@ interface BuildIdentity {
+   checkoutDirtyFiles?: number | undefined;
+ }
+ 
+-function liveIdentity(): BuildIdentity {
+-  const git = (args: string[]): string | undefined => tryGit(args, packageRoot());
++export function liveIdentity(root: string = packageRoot()): BuildIdentity {
++  // Only a package root with its own .git, as scripts/stamp-build.mjs
++  // asks: Git searches upward, so a release unpacked inside another
++  // repository would report that repository's commit.
++  if (!existsSync(join(root, '.git'))) return {};
++  const git = (args: string[]): string | undefined => tryGit(args, root);
+   // Full sha, compared exactly — --short lengthens as the repo grows,
+   // so equal objects can compare unequal as strings (Bugbot on #121).
+   const commit = git(['rev-parse', 'HEAD']);
+@@ -317,6 +321,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
+   // Shortened at display alone; the report and the drift comparison
+   // carry full shas.
+   const short = (sha: string): string => sha.slice(0, 7);
++  // A release install is no checkout, and it is the usual install, so its
++  // line is the version alone; only a build from a checkout names a commit.
+   const build = cli.commit
+     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
+       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
+@@ -332,8 +338,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
+           ? `; checkout has changed since the build — ${BUILD_CLI} to update`
+           : ''
+       }`
+-    : 'not a git checkout';
+-  lines.push(`field ${cli.version}  (${build})`);
++    : undefined;
++  lines.push(build === undefined ? `field ${cli.version}` : `field ${cli.version}  (${build})`);
+   lines.push(`worker protocol ${report.workerProtocol}`);
+   lines.push(formatRemoteReport(report.remote));
+   lines.push('');
