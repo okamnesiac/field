@@ -83,8 +83,12 @@ interface BuildIdentity {
   checkoutDirtyFiles?: number | undefined;
 }
 
-function liveIdentity(): BuildIdentity {
-  const git = (args: string[]): string | undefined => tryGit(args, packageRoot());
+export function liveIdentity(root: string = packageRoot()): BuildIdentity {
+  // Only a package root with its own .git, as scripts/stamp-build.mjs
+  // asks: Git searches upward, so a release unpacked inside another
+  // repository would report that repository's commit.
+  if (!existsSync(join(root, '.git'))) return {};
+  const git = (args: string[]): string | undefined => tryGit(args, root);
   // Full sha, compared exactly — --short lengthens as the repo grows,
   // so equal objects can compare unequal as strings (Bugbot on #121).
   const commit = git(['rev-parse', 'HEAD']);
@@ -317,6 +321,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
   // Shortened at display alone; the report and the drift comparison
   // carry full shas.
   const short = (sha: string): string => sha.slice(0, 7);
+  // A release install is no checkout, and it is the usual install, so its
+  // line is the version alone; only a build from a checkout names a commit.
   const build = cli.commit
     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
@@ -332,8 +338,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
           ? `; checkout has changed since the build — ${BUILD_CLI} to update`
           : ''
       }`
-    : 'not a git checkout';
-  lines.push(`field ${cli.version}  (${build})`);
+    : undefined;
+  lines.push(build === undefined ? `field ${cli.version}` : `field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
   lines.push(formatRemoteReport(report.remote));
   lines.push('');
