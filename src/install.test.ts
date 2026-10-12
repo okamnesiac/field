@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -73,6 +74,8 @@ const TOOLS = [
   'readlink',
   'tar',
   'gzip',
+  'mktemp',
+  'tail',
 ];
 
 let root: string;
@@ -127,7 +130,7 @@ case "$1 \${2:-}" in
     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
   "remove -g")
     rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
-  "install --frozen-lockfile") ;;
+  "install --frozen-lockfile") echo "Packages: +122" ;;
   "run build")
     mkdir -p "$dir/dist"
     node "$dir/scripts/stamp-build.mjs" > /dev/null
@@ -137,7 +140,7 @@ case "$1 \${2:-}" in
     mkdir -p "$dir/ui/dist"
     printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
   "run build:native")
-    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
+    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || { echo "cmake: JUCE did not compile" >&2; exit 2; }
     # Where native/audiod/CMakeLists.txt would have FetchContent put JUCE.
     mkdir -p "$dir/native/audiod/build"
     printf '%s\\n' "\${FIELD_FETCHCONTENT_BASE_DIR:-unset}" > "$dir/native/audiod/build/fetchcontent"
@@ -259,6 +262,7 @@ beforeEach(() => {
   git(root, 'clone', '--quiet', upstream, repo);
 
   mkdirSync(bin);
+  mkdirSync(join(root, 'tmp'));
   for (const tool of TOOLS) {
     const path = which(tool);
     if (path !== undefined) symlinkSync(path, join(bin, tool));
@@ -325,6 +329,7 @@ function install(target?: string, env: Record<string, string> = {}, script = joi
       FAKE_LOG: log,
       FAKE_PNPM_HOME: pnpmHome,
       FAKE_CLI: join(root, 'cli.js'),
+      TMPDIR: join(root, 'tmp'),
       ...env,
     },
   });
@@ -679,6 +684,35 @@ posix('install.sh audiod and workers', () => {
     const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
     expect(run.status).toBe(1);
     expect(rows(run.stdout).has('built')).toBe(false);
+  });
+
+  it('keeps build output off the screen, and removes its log once the target succeeds', () => {
+    const run = install('cli');
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain('Packages: +122');
+    expect(rows(run.stdout).has('linked')).toBe(true);
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
+  });
+
+  it("prints the end of a failed step's output, and keeps the log", () => {
+    const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(
+      'install.sh: pnpm --dir ~/checkout run build:native exited with status 2. The end of its output:\n\n  cmake: JUCE did not compile\n',
+    );
+    const logs = readdirSync(join(root, 'tmp'));
+    expect(logs).toHaveLength(1);
+    expect(run.stderr).toContain(`The whole log is in ${join(root, 'tmp', logs[0]!)}\n`);
+    expect(readFileSync(join(root, 'tmp', logs[0]!), 'utf8')).toBe(
+      `$ pnpm --dir ${repo} run build:native\ncmake: JUCE did not compile\n`,
+    );
+  });
+
+  it('shows every line of build output with FIELD_VERBOSE', () => {
+    const run = install('cli', { FIELD_VERBOSE: '1' });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain('Packages: +122\n');
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
   });
 
   it('re-syncs workers through the CLI, which knows which are set up', () => {
