@@ -1,0 +1,104 @@
+{
+ "version": 1,
+ "name": "Quiet installer builds",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 224,
+  "title": "Fit an install on one screen: build output goes to a log, shown in a dimmed window",
+  "head": "b80c9555787ffda6f6cf85e01ed05b9807479c86",
+  "headRef": "install/quiet-build",
+  "base": "83b91539ff3f0b75cea3e4908d8b733b938e0f34",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field’s installer builds the command-line tool, user interface, audio daemon, and worker environments. Compiler and package-manager output can bury its status rows. This change captures that output in one temporary log and displays a short, temporary window while a command runs.",
+   "Successful targets remove the log. A failed command prints its own final 20 lines and keeps the complete log. <code>FIELD_VERBOSE=1</code> restores streaming output and makes no log."
+  ],
+  "cards": [
+   {
+    "id": "review",
+    "title": "Review result",
+    "html": "<p>The review found one terminal-display defect: wide characters can wrap despite truncation, leaving output behind after redraw. All 130 focused installer and upgrade tests passed; those tests run without a terminal.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "output",
+   "title": "Build output stays in a temporary window",
+   "kicker": "One wrapper captures output and reports failures",
+   "intro": [
+    "Each build or setup command now goes through <code>step</code>, which captures both output streams in a private temporary file. Commands keep their exit status and read no interactive input.",
+    "A terminal shows the command and its last five output lines. The window redraws in place and erases itself after the command. Redirected output shows only the installer’s own rows, while a failure prints the end of the failed command and the log path."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "Adds command logging, terminal redraw, failure reporting, and cleanup, then wraps the existing build and setup commands.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 135,
+       "text": "Wide characters occupy two terminal columns, but the substring limit counts characters. A 20-column terminal received 34 columns of output while redraw still assumed one row, leaving old output behind."
+      },
+      {
+       "kind": "verify",
+       "line": 147,
+       "text": "The focused installer tests verified that failure output names the failed native build and retains its log. Successful targets remove logs, and verbose mode streams output without creating one."
+      },
+      {
+       "kind": "context",
+       "line": 1366,
+       "text": "Cleanup runs after the target succeeds. An earlier failure exits before cleanup, retaining the log for diagnosis."
+      }
+     ]
+    },
+    {
+     "path": "src/install.test.ts",
+     "note": "Adds isolated temporary logs and checks quiet output, failure diagnostics, and verbose mode.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 689,
+       "text": "Ran the installer and upgrade suites: 130 tests passed. The new quiet-output test checks that package-manager output is absent and the temporary directory is empty after success."
+      },
+      {
+       "kind": "context",
+       "line": 697,
+       "text": "These tests capture stdout and stderr through pipes. They cover logs and exit behavior, while terminal cursor movement needs separate terminal coverage."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Installer output is part of the install contract",
+   "kicker": "The reference and plan describe the new output modes",
+   "intro": [
+    "The install reference explains where command output goes, what a failure prints, and how to restore streaming output. The project plan records the same behavior for checkout and release installs."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "Documents the temporary window, retained failure logs, and FIELD_VERBOSE."
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "Records the quiet-output design in section 2.8.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 180,
+       "text": "This addition changes the output design of the existing install project. It does not change the plan’s readiness status or introduce an unanswered design question."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
