@@ -66,6 +66,7 @@ const TOOLS = [
   'mkdir',
   'ln',
   'rm',
+  'rmdir',
   'chmod',
   'touch',
   'mv',
@@ -124,6 +125,8 @@ case "$1 \${2:-}" in
     ln -s "$3" "$FAKE_PNPM_HOME/global/field"
     printf '#!/bin/sh\\n' > "$FAKE_PNPM_HOME/bin/field"
     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
+  "remove -g")
+    rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
   "install --frozen-lockfile") ;;
   "run build")
     mkdir -p "$dir/dist"
@@ -1359,11 +1362,213 @@ posix('install.sh status in a release install', () => {
   });
 });
 
+// install.md §3.5: uninstall removes what the installer can show it made,
+// and nothing else.
+posix('install.sh uninstall', () => {
+  it('removes a release install: the shim, every version, current, release.conf, and the cache, then the data directory', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    release();
+    write(join(data, 'cache', 'fetchcontent', 'juce-src', 'CMakeLists.txt'), '');
+    const run = release('uninstall');
+    expect(run.stderr).toBe('');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(data)).toBe(false);
+    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
+    expect(run.stdout).toContain('removed        0.2.0\n');
+    expect(run.stdout).toContain('removed        0.3.0\n');
+    expect(run.stdout).toContain('removed        ~/.local/share/field\n');
+    expect(rows(run.stdout).get('uninstalled')).toBe('to install again: curl -fsSL https://field.one/install.sh | bash');
+  });
+
+  it('keeps what it did not put there: another field in the bin directory, and other things in the data directory', () => {
+    const others = ['3.11.4/bin/python3', '.download-9.9.9/notes', 'notes/todo'];
+    for (const path of others) write(join(data, path), '');
+    publish('0.2.0');
+    release();
+    write(shim, '#!/bin/sh\necho mine\n', 0o755);
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
+    for (const path of others) expect(existsSync(join(data, path))).toBe(true);
+    expect(existsSync(join(data, '0.2.0'))).toBe(false);
+    expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(existsSync(join(data, 'release.conf'))).toBe(false);
+    expect(run.stdout).toContain("kept           ~/.local/bin/field, which is not Field's release shim\n");
+    expect(run.stdout).toContain('kept           ~/.local/share/field, which holds things Field did not put there\n');
+    expect(run.stdout).not.toContain('3.11.4');
+  });
+
+  // The shim is the one record of where its install lives, so the
+  // uninstall of another data directory leaves it to name that one.
+  it('keeps a shim that runs another data directory, and names that directory', () => {
+    publish('0.2.0');
+    const custom = join(root, 'custom');
+    release(undefined, { FIELD_DATA_DIR: custom });
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
+    expect(rows(run.stdout).get('kept')).toBe(
+      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
+    );
+    expect(release('uninstall', { FIELD_DATA_DIR: custom }).status).toBe(0);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(custom)).toBe(false);
+  });
+
+  it('removes its own versions, and keeps the shim another install wrote over its own', () => {
+    publish('0.2.0');
+    release();
+    const custom = join(root, 'custom');
+    release(undefined, { FIELD_DATA_DIR: custom });
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(existsSync(data)).toBe(false);
+    expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(current(custom)).toBe('0.2.0');
+    expect(rows(run.stdout).get('kept')).toBe(
+      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
+    );
+  });
+
+  it('keeps a shim whose exec line it cannot read', () => {
+    publish('0.2.0');
+    release();
+    const text = readFileSync(shim, 'utf8').replace(/^exec node .*$/m, 'exec node "$HOME/elsewhere/cli.js" "$@"');
+    write(shim, text, 0o755);
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(readFileSync(shim, 'utf8')).toBe(text);
+    expect(existsSync(data)).toBe(false);
+    expect(rows(run.stdout).get('kept')).toBe('~/.local/bin/field, which does not run ~/.local/share/field/current');
+  });
+
+  // `field uninstall` hands the installer the data directory's real path,
+  // and the shim has the path it was installed through, quoted.
+  it('removes the shim it wrote through a link to the data directory, whose path needs quoting', () => {
+    publish('0.2.0');
+    mkdirSync(join(root, 'real'));
+    symlinkSync(join(root, 'real'), join(root, 'link'));
+    release(undefined, { FIELD_DATA_DIR: join(root, 'link', "a user's data") });
+    const run = release('uninstall', { FIELD_DATA_DIR: join(root, 'real', "a user's data") });
+    expect(run.status).toBe(0);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(join(root, 'real', "a user's data"))).toBe(false);
+    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
+  });
+
+  // field-aced downloads ACE-Step's weights into a directory of Field's own
+  // (models_root in python/aced), and Chatterbox's go to the Hugging Face
+  // cache, so each worker set up names the directory its weights are in.
+  const ACE_ROW =
+    "ACE-Step's weights stay in ~/.field/models/acestep, which every Field install on this machine uses — delete it once none of them needs the weights";
+  const CHATTERBOX_ROW =
+    "Chatterbox's weights stay in the Hugging Face cache, ~/.cache/huggingface, which other tools share — remove the models you no longer want from there";
+
+  function weights(): { ace: string; huggingface: string } {
+    const ace = join(root, '.field', 'models', 'acestep', 'checkpoints');
+    const huggingface = join(root, '.cache', 'huggingface', 'hub');
+    mkdirSync(ace, { recursive: true });
+    mkdirSync(huggingface, { recursive: true });
+    return { ace, huggingface };
+  }
+
+  it("leaves each worker's model weights where the worker keeps them, and says where", () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    field('setup', 'voiced');
+    const { ace, huggingface } = weights();
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(existsSync(ace)).toBe(true);
+    expect(existsSync(huggingface)).toBe(true);
+    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
+    expect(run.stdout).toContain(`models-kept    ${CHATTERBOX_ROW}\n`);
+  });
+
+  it('names only the weights of the workers that were set up', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    weights();
+    const run = release('uninstall');
+    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
+    expect(run.stdout).not.toContain('Chatterbox');
+  });
+
+  it('names the directories FIELD_ACE_MODELS and HF_HUB_CACHE move the weights to', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    field('setup', 'voiced');
+    mkdirSync(join(root, 'ace'));
+    mkdirSync(join(root, 'hub'));
+    const run = release('uninstall', {
+      FIELD_ACE_MODELS: join(root, 'ace'),
+      HF_HOME: join(root, 'hf'),
+      HF_HUB_CACHE: join(root, 'hub'),
+    });
+    expect(run.stdout).toContain("ACE-Step's weights stay in ~/ace,");
+    expect(run.stdout).toContain("Chatterbox's weights stay in the Hugging Face cache, ~/hub,");
+  });
+
+  it('says nothing about models when no worker was set up', () => {
+    publish('0.2.0');
+    release();
+    weights();
+    expect(rows(release('uninstall').stdout).has('models-kept')).toBe(false);
+  });
+
+  it("names a fork's installer as the way to install again", () => {
+    publish('0.2.0', { repo: 'someone/field', ref: 'main' });
+    release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' });
+    expect(rows(release('uninstall').stdout).get('uninstalled')).toBe(
+      'to install again: curl -fsSL https://raw.githubusercontent.com/someone/field/main/install.sh | bash',
+    );
+  });
+
+  it('says so, and changes nothing, when no release is installed', () => {
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
+  });
+
+  it("removes a checkout's pnpm link, and keeps the checkout", () => {
+    install('cli');
+    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(repo);
+    const run = install('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual(['pnpm remove -g field']);
+    expect(existsSync(join(pnpmHome, 'global', 'field'))).toBe(false);
+    expect(existsSync(join(repo, 'install.sh'))).toBe(true);
+    expect(existsSync(join(repo, 'dist'))).toBe(true);
+    expect(rows(run.stdout).get('unlinked')).toBe("pnpm's global field no longer links ~/checkout");
+  });
+
+  it('leaves a link to another checkout alone', () => {
+    const other = join(root, 'other');
+    mkdirSync(other);
+    linkTo(other);
+    const run = install('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(other);
+    expect(run.stdout).toContain("pnpm's global field links ~/other, not this checkout");
+  });
+});
+
 posix('install.sh refuses', () => {
   it('an unknown target, as a usage error', () => {
     const run = install('everything');
     expect(run.status).toBe(64);
-    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status]');
+    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status|uninstall]');
     expect(existsSync(join(repo, 'dist'))).toBe(false);
   });
 });

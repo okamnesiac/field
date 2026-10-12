@@ -365,6 +365,53 @@ bash reads the script from stdin, so the question reads its answer from
 chunk 5 does. `xcode-select --install` opens a dialog and returns before
 the tools are in place, so it stays a printed step. Not started.
 
+### 3.5 Uninstall (chunk 7)
+
+```sh
+field uninstall
+curl -fsSL https://field.one/uninstall.sh | bash
+```
+
+`install.sh` has an `uninstall` target, and `field uninstall` runs it the
+way `field upgrade` runs the installer: a checkout's own `install.sh`,
+or the newest release's. Nothing else decides what an uninstall
+removes.
+
+- **A release install.** The target removes the shim, but only when it
+  carries the installer's marker and runs this data directory's
+  `current`; every version and download that the installer can show it
+  made, by the same tests `prune` uses; `current`; `release.conf`; and
+  JUCE's download in `cache/fetchcontent`. Then it removes the data
+  directory if nothing else is left in it. Anything else, in the data
+  directory or in the bin directory, stays, with a `kept` row. The shim
+  goes first, so `field` never runs a version half removed.
+- **A shim that runs another data directory stays.** It is the one
+  record of where that install lives, so its `kept` row names the
+  directory and says to uninstall again with `FIELD_DATA_DIR` set to
+  it. The shim's exec line holds the path it was installed through, and
+  `field uninstall` names the data directory by its real path, so the
+  two compare as files when their text differs.
+- **The model weights stay.** field-aced keeps ACE-Step's in
+  `FIELD_ACE_MODELS`, or `~/.field/models/acestep`, which every Field
+  install on the machine uses (`models_root` in `python/aced`).
+  field-voiced's Chatterbox keeps its weights in the Hugging Face cache
+  (`HF_HUB_CACHE`, `HF_HOME`, or `~/.cache/huggingface`), which other
+  tools share. For each worker that was set up, the target names the
+  directory its weights are in rather than removing it.
+- **A checkout install.** The target runs `pnpm remove -g field` when
+  pnpm's global `field` links this checkout, leaves a link to another
+  checkout alone, and never deletes the checkout, which someone cloned
+  and which may hold work in progress.
+- **`field.one/uninstall.sh`.** A static file in `apps/field-one/public`
+  that runs `curl -fsSL https://field.one/install.sh | bash -s --
+  uninstall`. It works when `field` itself no longer does, and keeps the
+  logic in the one installer, versioned and tested with it. It shipped
+  in okamnesiac/audiofield#43 ahead of the release that carries the
+  target, so until that release it runs 0.3.0's installer, which
+  rejects `uninstall` with a usage error and exit status 64, changing
+  nothing. The page does not advertise it; the README and
+  `docs/install.md` do.
+
 ## 4 Why this design (DECIDED, 2026-10-11)
 
 - **A bash installer, as Projector has.** A Node script cannot run
@@ -457,6 +504,17 @@ the tools are in place, so it stays a printed step. Not started.
   for a version whose `field upgrade` reads `FIELD_REF`, and 0.2.0's
   runs its own `install.sh` as a checkout's, so the installer refuses
   any version whose `install.sh` writes no shim.
+- **Uninstall is a target of the one installer** (§3.5, decided
+  2026-10-11). A separate `uninstall.sh` in this repository lost because
+  it would need its own copy of the data directory's resolution and of
+  the tests for what the installer made, and the two would drift. A
+  `field uninstall` that removes files from TypeScript lost for the same
+  reason, and because it cannot help when `field` itself no longer runs.
+  `field.one/uninstall.sh` is a static file that runs the installer's
+  target, so the curl path needs nothing of its own. Removing the model
+  weights lost: other tools share the Hugging Face cache, and every
+  Field install on the machine, checkouts included, shares ACE-Step's
+  directory.
 
 ## 5 Acceptance criteria
 
@@ -519,6 +577,16 @@ Chunk 6:
   install them, installs them on a yes, and goes on to install Field.
 - With no terminal, or on a no, it prints the commands as chunk 5 does.
 
+Chunk 7:
+
+- `field uninstall` in a release install removes the shim, every
+  version, `current`, `release.conf`, and the JUCE cache, then the data
+  directory, and leaves anything the installer did not make.
+- In a checkout install it removes pnpm's link to that checkout, and
+  never the checkout.
+- `curl -fsSL https://field.one/uninstall.sh | bash` does the same once
+  a release carries the target.
+
 ## 6 Chunks
 
 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
@@ -526,8 +594,10 @@ Chunk 6:
 3. **The release installer.** §3.2. Shipped in #214.
 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
    in okamnesiac/audiofield#40.
-5. **Name everything missing.** §3.4. This change.
+5. **Name everything missing.** §3.4. Shipped in #218.
 6. **Offer to install it with Homebrew.** §3.4. Not started.
+7. **Uninstall.** §3.5. This change. `field.one/uninstall.sh` shipped
+   early, in okamnesiac/audiofield#43, and works once this is released.
 
 ## 7 Open questions
 
@@ -626,15 +696,16 @@ version.
 before it switches to it.** The old version's `field setup --check`
 says which workers are set up; the new version's `field setup <name>`
 sets up each one. Nothing large downloads again: the model weights live
-in the Hugging Face cache and the packages in uv's cache. A worker whose
-uv is gone is skipped with a `worker-skipped` row, because it could not
-run in the old version either, and any other failure stops the upgrade
-with the old version still current. The alternative, pointing
-`UV_PROJECT_ENVIRONMENT` at a directory outside the version, lost
-because `workerScriptInstalled` in `src/workers/client.ts` looks for
-each worker's console script in `python/<worker>/.venv`, and one
-environment shared across versions would hold the old version's
-packages while the new one ran.
+outside every version, ACE-Step's in `~/.field/models/acestep` and
+Chatterbox's in the Hugging Face cache, and the packages live in uv's
+cache. A worker whose uv is gone is skipped with a `worker-skipped` row,
+because it could not run in the old version either, and any other
+failure stops the upgrade with the old version still current. The
+alternative, pointing `UV_PROJECT_ENVIRONMENT` at a directory outside
+the version, lost because `workerScriptInstalled` in
+`src/workers/client.ts` looks for each worker's console script in
+`python/<worker>/.venv`, and one environment shared across versions
+would hold the old version's packages while the new one ran.
 
 ### 7.6 Windows (DECIDED, 2026-10-11)
 
@@ -886,6 +957,10 @@ building it found.
 
 ### 10.3 What is still owed
 
-- Release this change, then install it for real with `curl` from
-  `raw.githubusercontent.com` on a machine that has no checkout.
-- Chunk 4.
+- Nothing. 0.3.0 released this change (#216), and the first real
+  install, `curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash`
+  on a Mac into throwaway data and bin directories, took 255 s,
+  compiling JUCE from scratch. `field --version` printed `field 0.3.0`
+  and `field upgrade status` reported `release-latest 0.3.0 is
+  installed`. Chunk 4 shipped in okamnesiac/audiofield#40, and
+  `field.one/install.sh` serves the same installer.

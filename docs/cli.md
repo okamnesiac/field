@@ -23,7 +23,7 @@ never npm or yarn — and CMake with a C++ compiler. Install the newest
 release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+curl -fsSL https://field.one/install.sh | bash
 ```
 
 The installer builds the release from source in
@@ -698,6 +698,7 @@ amended. Porting the rest is tracked there and in
 | `field plugins scan\|list\|pin` | the hosted plugin inventory |
 | `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
 | `field upgrade [target]` | run the installer from anywhere: a checkout's own `install.sh`, or the newest release's, with `all`, `cli`, `audiod`, `workers`, or `status` |
+| `field uninstall` | remove field: a release install's versions and shim, or a checkout's pnpm link, leaving the checkout itself |
 | `field generate <song>/<name>` | run a deliberate generator |
 | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
 | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |

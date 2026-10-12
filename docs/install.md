@@ -11,8 +11,13 @@ is out of date.
 To install the newest release, pipe the installer to bash:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+curl -fsSL https://field.one/install.sh | bash
 ```
+
+field.one serves `install.sh` from the `v0` tag, so this is the same
+installer as
+`https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh`, which
+`field upgrade` downloads.
 
 To install a checkout, clone it and run the installer in it:
 
@@ -208,10 +213,11 @@ the release `v0` names again.
 Each version keeps its worker environments in its own
 `python/<worker>/.venv`, so an upgrade sets up again, in the new version,
 each worker you set up in the old one, before it switches. The model
-weights live in the Hugging Face cache and the packages in uv's cache,
-so nothing large downloads again. A worker whose uv is gone is skipped
-with a `worker-skipped` row that names the fix, because it could not run
-in the old version either.
+weights live outside every version, ACE-Step's in
+`~/.field/models/acestep` and Chatterbox's in the Hugging Face cache,
+and the packages live in uv's cache, so nothing large downloads again.
+A worker whose uv is gone is skipped with a `worker-skipped` row that
+names the fix, because it could not run in the old version either.
 
 ### What each target does in a release install
 
@@ -222,6 +228,7 @@ in the old version either.
 | `audiod` | Rebuilds `field-audiod` and FieldOut of the installed version where it is. |
 | `workers` | Runs the installed version's `field setup --existing`. |
 | `status` | Reports what is installed, changing nothing. |
+| `uninstall` | Removes the install, as [Remove a release install](#remove-a-release-install) describes. `field uninstall` runs it. |
 
 `cli`, `audiod`, and `workers` repair the installed version rather than
 move it, as they rebuild a checkout without pulling, so a command the
@@ -254,8 +261,40 @@ repository and check out its tag.
 ### Remove a release install
 
 ```sh
-rm -rf ~/.local/share/field ~/.local/bin/field
+field uninstall
 ```
+
+If `field` itself no longer runs, use the uninstaller field.one serves,
+which runs the newest installer's `uninstall` target:
+
+```sh
+curl -fsSL https://field.one/uninstall.sh | bash
+```
+
+Either way it removes the shim, every version and download the installer
+made, `current`, `release.conf`, and JUCE's download, then the data
+directory if nothing else is left in it. It leaves anything it did not
+put there, in the data directory or in the bin directory, and says so.
+
+The uninstall removes the shim only when it runs the data directory
+being uninstalled. If you installed with `FIELD_DATA_DIR`, set it again
+when you uninstall with curl. `field uninstall` finds the directory
+itself. Without `FIELD_DATA_DIR`, the curl uninstall looks in the
+default data directory, and it keeps a shim that runs another one, with
+a `kept` row that names that directory.
+
+The model workers' weights stay. For each worker you set up, the
+uninstall prints a `models-kept` row that names the directory its
+weights are in:
+
+- **ACE-Step**, for `field-aced`: about 10 GB in
+  `~/.field/models/acestep`, or in `FIELD_ACE_MODELS` when you set it.
+  Every Field install on the machine uses that directory, checkouts
+  included, so delete it only once none of them needs the weights.
+- **Chatterbox**, for `field-voiced`: about 2 GB in the Hugging Face
+  cache, `~/.cache/huggingface` unless `HF_HOME` or `HF_HUB_CACHE` moves
+  it. Other tools share that cache, so remove only
+  `hub/models--ResembleAI--chatterbox` from it.
 
 ## Install from a checkout
 
@@ -269,9 +308,10 @@ With none, they run `all`.
 | `workers` | `field setup --existing`, which re-syncs each worker environment you set up with `field setup` and sets up no new one. |
 | `all` | `cli`, then `audiod`, then `workers`. |
 | `status` | Reports what is installed, changing nothing. |
+| `uninstall` | `pnpm remove -g field` when pnpm's global `field` links this checkout, as [Remove a checkout install](#remove-a-checkout-install) describes. `field uninstall` runs it. |
 
-Each target except `status` ends by fetching the checkout's upstream
-and warning if the checkout is behind it.
+Each target except `status` and `uninstall` ends by fetching the
+checkout's upstream and warning if the checkout is behind it.
 
 The installer installs the checkout as it is. It never pulls, and it
 never switches branches, because the checkout may hold work in progress.
@@ -314,10 +354,14 @@ syncing the field-aced environment (uv)…
 
 ### Remove a checkout install
 
-Unlink pnpm's global `field`. The checkout stays where it is.
+`field uninstall`, or `./install.sh uninstall` in the checkout, runs
+`pnpm remove -g field` when pnpm's global `field` links this checkout,
+and leaves a link to another checkout alone. The checkout stays where it
+is, with its builds and worker environments; delete it yourself if you
+no longer want it.
 
 ```sh
-pnpm remove -g field
+field uninstall
 ```
 
 ## Read the status

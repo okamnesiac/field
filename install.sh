@@ -3,9 +3,10 @@
 # Install Field: the `field` command, the audio daemon field-audiod, and
 # the model-worker environments you have already set up.
 #
-#   curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
-#   ./install.sh [all|cli|audiod|workers|status]      from a checkout
-#   field upgrade [all|cli|audiod|workers|status]     the same, from anywhere
+#   curl -fsSL https://field.one/install.sh | bash
+#   ./install.sh [all|cli|audiod|workers|status|uninstall]   from a checkout
+#   field upgrade [all|cli|audiod|workers|status]            the same, from anywhere
+#   field uninstall                                          ./install.sh uninstall, from anywhere
 #
 # Run from a checkout, it installs that checkout as it is. It never pulls;
 # `status` says how far the checkout is behind its upstream instead.
@@ -752,6 +753,29 @@ version_older() {
 
 is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
 
+# The data directory a release shim runs: the path write_shim quoted on its
+# exec line, less /current/dist/cli.js, or nothing when the line is not in
+# that shape.
+shim_data_dir() {
+  local path quote="'\\''" tick="'" tail="/current/dist/cli.js' \"\$@\""
+  path="$(sed -n 's/^exec node //p' "$1")"
+  path="${path%%$'\n'*}"
+  case "$path" in "$tick"*"$tail") ;; *) return 0 ;; esac
+  path="${path#"$tick"}"
+  path="${path%"$tail"}"
+  printf '%s' "${path//"$quote"/$tick}"
+}
+
+# True when the shim runs this data directory's current. `field uninstall`
+# names the data directory by its real path, and the shim by the path it
+# was installed through, so the two compare as files when they differ.
+shim_runs_here() {
+  local dir
+  is_release_shim "$1" || return 1
+  dir="$(shim_data_dir "$1")"
+  [ -n "$dir" ] && { [ "$dir" = "$DATA_DIR" ] || [ "$dir" -ef "$DATA_DIR" ]; }
+}
+
 # The shim replaces only itself: a `field` someone else put in the bin
 # directory stops the installer before anything changes. So does a bin
 # directory it cannot write, because the shim is written after the switch.
@@ -834,10 +858,10 @@ workers_set_up_in() {
 # A worker's environment lives in python/<worker>/.venv inside the version,
 # so each worker set up in the version being replaced is set up again in
 # the new one, with the new one's CLI, before the switch (install.md §7.5).
-# Its weights are in the Hugging Face cache and its packages in uv's, so
-# nothing large downloads again. One whose uv is gone could not run in the
-# old version either, so it is skipped with a row rather than failing the
-# upgrade.
+# Its weights are outside the version, where ace_models and
+# huggingface_cache say, and its packages in uv's cache, so nothing large
+# downloads again. One whose uv is gone could not run in the old version
+# either, so it is skipped with a row rather than failing the upgrade.
 setup_workers_again() {
   local old="$1" list label name
   list="$(workers_set_up_in "$DATA_DIR/$old")"
@@ -1057,6 +1081,97 @@ install_release() {
   report_shim
 }
 
+# Where the model workers' weights live, which an uninstall names rather
+# than removes. field-aced downloads ACE-Step's into a directory of Field's
+# own that every install on the machine uses (models_root in python/aced).
+# field-voiced's Chatterbox downloads into the Hugging Face cache, which
+# other tools share.
+ace_models() { printf '%s' "${FIELD_ACE_MODELS:-$HOME/.field/models/acestep}"; }
+
+huggingface_cache() {
+  if [ -n "${HF_HUB_CACHE:-}" ]; then
+    printf '%s' "$HF_HUB_CACHE"
+  elif [ -n "${HF_HOME:-}" ]; then
+    printf '%s' "$HF_HOME"
+  else
+    printf '%s/huggingface' "${XDG_CACHE_HOME:-$HOME/.cache}"
+  fi
+}
+
+# The row for a `field` in the bin directory that the uninstall leaves. A
+# release shim that runs another data directory is the one record of where
+# that install lives, so the row names it.
+keep_shim() {
+  local other
+  if is_release_shim "$1"; then
+    other="$(shim_data_dir "$1")"
+    if [ -n "$other" ]; then
+      row kept "$(tilde "$1"), which runs the install in $(tilde "$other") — to remove that install, uninstall again with FIELD_DATA_DIR=$(tilde "$other")"
+    else
+      row kept "$(tilde "$1"), which does not run $(tilde "$DATA_DIR/current")"
+    fi
+  elif [ -e "$1" ] || [ -L "$1" ]; then
+    row kept "$(tilde "$1"), which is not Field's release shim"
+  fi
+}
+
+# Removes a release install (install.md §3.5): the shim, when it is the
+# installer's and runs this data directory, every version and download the
+# installer can show it made, `current`, release.conf, and JUCE's download,
+# then the data directory if nothing else is left in it. FIELD_DATA_DIR can
+# name a directory that holds other things, so those stay, as does any
+# other `field` in the bin directory. The shim goes first, so `field` never
+# runs a version half removed.
+uninstall_release() {
+  local shim="$BIN_DIR/field" entry name aced="" voiced="" models
+  if [ -z "$(current_version)" ] && [ -z "$(kept_versions "")" ] && ! shim_runs_here "$shim"; then
+    row not-installed "no release of Field is installed in $(tilde "$DATA_DIR")"
+    ! is_release_shim "$shim" || keep_shim "$shim"
+    return 0
+  fi
+  if shim_runs_here "$shim"; then
+    rm -f "$shim"
+    row removed "$(tilde "$shim")"
+  else
+    keep_shim "$shim"
+  fi
+  for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
+    name="${entry##*/}"
+    if is_field_version "$entry"; then
+      [ ! -d "$entry/python/aced/.venv" ] || aced=1
+      [ ! -d "$entry/python/voiced/.venv" ] || voiced=1
+      rm -rf "$entry"
+      row removed "$name"
+    elif is_field_download "$entry"; then
+      rm -rf "$entry"
+    fi
+  done
+  if [ -L "$DATA_DIR/current" ]; then rm -f "$DATA_DIR/current"; fi
+  rm -f "$RECORD"
+  rm -rf "$FETCH_CACHE"
+  rmdir "$DATA_DIR/cache" 2>/dev/null || true
+  if rmdir "$DATA_DIR" 2>/dev/null; then
+    row removed "$(tilde "$DATA_DIR")"
+  elif [ -d "$DATA_DIR" ]; then
+    row kept "$(tilde "$DATA_DIR"), which holds things Field did not put there"
+  fi
+  models="$(ace_models)"
+  if [ -n "$aced" ] && [ -d "$models" ]; then
+    row models-kept "ACE-Step's weights stay in $(tilde "$models"), which every Field install on this machine uses — delete it once none of them needs the weights"
+  fi
+  models="$(huggingface_cache)"
+  if [ -n "$voiced" ] && [ -d "$models" ]; then
+    row models-kept "Chatterbox's weights stay in the Hugging Face cache, $(tilde "$models"), which other tools share — remove the models you no longer want from there"
+  fi
+  # release_init read release.conf before it went, so a fork's install
+  # names the fork's installer.
+  if [ "$RELEASE_REPO/$RELEASE_REF" = "$DEFAULT_REPO/$DEFAULT_REF" ]; then
+    row uninstalled "to install again: curl -fsSL https://field.one/install.sh | bash"
+  else
+    row uninstalled "to install again: curl -fsSL $RAW_URL/$RELEASE_REPO/$RELEASE_REF/install.sh | bash"
+  fi
+}
+
 # A Windows installer belongs to windows-portability.md (install.md §7.6),
 # so a Windows shell such as Git Bash stops here, as `field upgrade` stops
 # on Windows, rather than trying a release install nobody has run there.
@@ -1089,7 +1204,23 @@ release_main() {
       ;;
     workers) require_tools node; require_installed; install_workers; report_release "$(current_version)" ;;
     status) show_release_status ;;
+    uninstall) uninstall_release ;;
   esac
+}
+
+# A checkout install is pnpm's global link to the checkout, so uninstalling
+# it removes that link. The checkout stays, with its builds and worker
+# environments: it is a clone someone made, and may hold work in progress.
+uninstall_checkout() {
+  if [ -n "$LINKED" ] && [ "$LINKED" = "$CHECKOUT" ]; then
+    pnpm remove -g field
+    row unlinked "pnpm's global field no longer links $(tilde "$CHECKOUT")"
+  elif [ -n "$LINKED" ]; then
+    row kept "pnpm's global field links $(tilde "$LINKED"), not this checkout — run the install.sh there with uninstall to remove it"
+  else
+    row not-installed "pnpm links no field"
+  fi
+  row kept "$(tilde "$CHECKOUT"), the checkout itself, with its builds and worker environments — delete it yourself if you no longer want it"
 }
 
 checkout_main() {
@@ -1109,6 +1240,7 @@ checkout_main() {
     audiod) require_tools pnpm compiler git cmake headers; install_audiod; report_checkout ;;
     workers) require_tools node; install_workers; report_checkout ;;
     status) show_status ;;
+    uninstall) uninstall_checkout ;;
   esac
 }
 
@@ -1117,11 +1249,11 @@ checkout_main() {
 # short runs nothing, and no command can read the rest of the script as
 # its input.
 main() {
-  [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
+  [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64
   TARGET="${1:-all}"
   case "$TARGET" in
-    all | cli | audiod | workers | status) ;;
-    *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
+    all | cli | audiod | workers | status | uninstall) ;;
+    *) die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64 ;;
   esac
   if [ -n "$CHECKOUT" ]; then checkout_main; else release_main; fi
 }
