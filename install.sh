@@ -63,6 +63,87 @@ warn_row() {
   fi
 }
 
+# Build output: install.md §2.8.
+STEP_LINES=5
+LOG=""
+
+# Standard input is /dev/null: piped from curl, it is the script.
+step() {
+  local status=0 dir start
+  if [ -n "${FIELD_VERBOSE:-}" ]; then
+    "$@" </dev/null
+    return
+  fi
+  if [ -z "$LOG" ]; then
+    dir="${TMPDIR:-/tmp}"
+    LOG="$(mktemp "${dir%/}/field-install.XXXXXX")" || die "could not make a log file in ${dir%/}"
+  fi
+  start="$(sed -n '$=' "$LOG")"
+  printf '$ %s\n' "$*" >>"$LOG"
+  if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
+    "$@" </dev/null 2>&1 | step_window "$(step_title "$@")" || status=$?
+  else
+    "$@" </dev/null >>"$LOG" 2>&1 || status=$?
+  fi
+  [ "$status" -eq 0 ] || step_failed "$(step_title "$@")" "$status" "$((${start:-0} + 2))"
+  return "$status"
+}
+
+step_title() {
+  local arg title=""
+  for arg in "$@"; do title="$title${title:+ }$(tilde "$arg")"; done
+  printf '%s' "$title"
+}
+
+terminal_width() {
+  local size
+  size="$(stty size </dev/tty 2>/dev/null)" || size=""
+  size="${size##* }"
+  case "$size" in "" | 0 | *[!0-9]*) size="${COLUMNS:-80}" ;; esac
+  case "$size" in "" | *[!0-9]*) size=80 ;; esac
+  [ "$size" -ge 20 ] || size=20
+  printf '%s' "$size"
+}
+
+# Every line drawn is ASCII without control characters, so its length is
+# the columns it takes, and cutting it short of the terminal's width means
+# it never wraps: the redraw moves up one row per line. A character that
+# may be two columns wide, such as CJK, shows as ?.
+step_window() {
+  local title="$1" width line drawn=0 n=0 i dim="" plain=""
+  local lines=()
+  width=$(($(terminal_width) - 5))
+  title="${title//[^[:ascii:]]/?}"
+  title="${title//[[:cntrl:]]/}"
+  [ -n "${NO_COLOR:-}" ] || { dim=$'\033[2m'; plain=$'\033[0m'; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line" >&3
+    # A progress bar's last state follows its last carriage return.
+    line="${line##*$'\r'}"
+    line="${line//$'\t'/  }"
+    line="${line//[^[:ascii:]]/?}"
+    line="${line//[[:cntrl:]]/}"
+    if [ "$n" -lt "$STEP_LINES" ]; then n=$((n + 1)); else lines=("${lines[@]:1}"); fi
+    lines[n - 1]="$line"
+    [ "$drawn" -eq 0 ] || printf '\033[%dA' "$drawn"
+    printf '\r\033[2K%s  $ %s%s\n' "$dim" "${title:0:width}" "$plain"
+    for ((i = 0; i < n; i++)); do
+      printf '\r\033[2K%s  %s%s\n' "$dim" "${lines[i]:0:width}" "$plain"
+    done
+    drawn=$((n + 1))
+  done 3>>"$LOG"
+  [ "$drawn" -eq 0 ] || printf '\033[%dA\r\033[J' "$drawn"
+}
+
+# $3 is the line of LOG where the failed step's own output begins.
+step_failed() {
+  {
+    printf 'install.sh: %s exited with status %s. The end of its output:\n\n' "$1" "$2"
+    sed -n "$3,\$p" "$LOG" | tail -n 20 | sed 's/^/  /'
+    printf '\nThe whole log is in %s\n' "$LOG"
+  } >&2
+}
+
 commits() {
   if [ "$1" -eq 1 ]; then printf '1 commit'; else printf '%s commits' "$1"; fi
 }
@@ -307,13 +388,13 @@ build_cli() {
   # --frozen-lockfile, because an installer has no business rewriting the
   # checkout's lockfile; a checkout whose package.json moved ahead of it
   # gets pnpm's own error saying so.
-  pnpm --dir "$REPO" install --frozen-lockfile
+  step pnpm --dir "$REPO" install --frozen-lockfile
   # `pnpm install` builds the CLI through `prepare` only when it installed
   # something, so both builds run here, every time: a checkout edited
   # without a commit is as stale as one that moved. The UI builds with the
   # CLI because it bundles code from src/.
-  pnpm --dir "$REPO" run build
-  pnpm --dir "$REPO" run build:ui
+  step pnpm --dir "$REPO" run build
+  step pnpm --dir "$REPO" run build:ui
 }
 
 # pnpm links the checkout rather than copying it, so a later build takes
@@ -322,7 +403,7 @@ build_cli() {
 link_cli() {
   local found
   if [ "$LINKED" != "$REPO" ]; then
-    pnpm add -g "$REPO"
+    step pnpm add -g "$REPO"
     [ -z "$LINKED" ] || row moved "field $(tilde "$LINKED") -> $(tilde "$REPO")"
     refresh_linked
   fi
@@ -357,7 +438,7 @@ install_audiod() {
       row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
     fi
   fi
-  if ! pnpm --dir "$REPO" run build:native; then
+  if ! step pnpm --dir "$REPO" run build:native; then
     [ "$(uname -s)" != Linux ] ||
       echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
     exit 1
@@ -376,7 +457,7 @@ install_audiod() {
 install_workers() {
   [ -f "$REPO/dist/cli.js" ] ||
     die "the field CLI sets up worker environments, and it is not built — run $(rerun cli) first" 69
-  node "$REPO/dist/cli.js" setup --existing
+  step node "$REPO/dist/cli.js" setup --existing
 }
 
 report_checkout_row() {
@@ -897,7 +978,7 @@ setup_workers_again() {
       continue
     fi
     row setting-up "$name in $INSTALLING, as it was in $old"
-    node "$REPO/dist/cli.js" setup "$name" </dev/null
+    step node "$REPO/dist/cli.js" setup "$name"
   done <<EOF
 $list
 EOF
@@ -1237,7 +1318,7 @@ release_main() {
 # environments: it is a clone someone made, and may hold work in progress.
 uninstall_checkout() {
   if [ -n "$LINKED" ] && [ "$LINKED" = "$CHECKOUT" ]; then
-    pnpm remove -g field
+    step pnpm remove -g field
     row unlinked "pnpm's global field no longer links $(tilde "$CHECKOUT")"
   elif [ -n "$LINKED" ]; then
     row kept "pnpm's global field links $(tilde "$LINKED"), not this checkout — run the install.sh there with uninstall to remove it"
@@ -1280,6 +1361,7 @@ main() {
     *) die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64 ;;
   esac
   if [ -n "$CHECKOUT" ]; then checkout_main; else release_main; fi
+  [ -z "$LOG" ] || rm -f "$LOG"
 }
 
 main "$@"

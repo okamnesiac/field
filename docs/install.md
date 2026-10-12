@@ -369,6 +369,35 @@ no longer want it.
 field uninstall
 ```
 
+## What the installer prints
+
+The installer prints one row for each thing it does, such as
+`downloading`, `built`, and `switched`, so an install fits on one
+screen. The output of the commands it runs, such as `pnpm install` and
+the compiler, goes to a log file in `$TMPDIR` instead. In a terminal,
+the command that is running and its last five lines show dimmed below
+the rows as they arrive, and disappear when the command finishes. The
+window shows each character outside ASCII as `?`, so no line is wider
+than the terminal; the log keeps them as they were.
+
+When a command fails, the installer prints the end of that command's
+output and where the whole log is, and keeps the log:
+
+```console
+install.sh: pnpm --dir ~/.local/share/field/0.3.2 run build:native exited with status 1. The end of its output:
+
+  ...
+
+The whole log is in /var/folders/5d/2spqnw8d17sf5/T/field-install.Xa81Qz
+```
+
+When the installer succeeds, it removes the log. To see every line as it
+arrives instead, set `FIELD_VERBOSE`:
+
+```sh
+FIELD_VERBOSE=1 field upgrade
+```
+
 ## Read the status
 
 `field upgrade status` prints one row per fact. A row marked ⚠️ needs
@@ -447,6 +476,7 @@ worker-absent  field-aced is not set up — field setup aced sets it up
 | --- | --- |
 | `FIELD_OFFLINE=1` | In a checkout, skips the fetch and compares the checkout against the last fetch of its upstream. In a release install, `field upgrade` runs the installed version's own `install.sh` instead of downloading the newest one, `status` compares nothing, and `all` refuses, because it has nothing to download from. |
 | `FIELD_REPO`, `FIELD_REF` | The repository and ref a release install follows: `okamnesiac/field` and `v0` unless set. The installer records both in `release.conf`. |
+| `FIELD_VERBOSE=1` | Prints every line the installer's commands print, as it arrives, instead of the dimmed five-line window, and keeps no log. |
 | `FIELD_DATA_DIR` | Where release installs live. The default is `$XDG_DATA_HOME/field` when `XDG_DATA_HOME` is an absolute path, and `~/.local/share/field` otherwise. |
 | `FIELD_BIN_DIR` | Where the release install's shim goes: `~/.local/bin` unless set. The installer records it in `release.conf`. |
 | `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. `git ls-remote` does not use it: git asks with your own git credentials, and without them the installer reads the private fork at the ref rather than at its commit. |

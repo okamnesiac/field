@@ -177,6 +177,33 @@ checkout instead, because `field upgrade` refuses there (§7.6).
 | `docs/cli.md` | The install section, `field upgrade`, and the new `field setup` options. |
 | `README.md`, `examples/bloom/README.md` | Lead with `./install.sh`. |
 
+### 2.8 Output fits on one screen
+
+An install prints its rows and nothing else that stays on screen. Until
+2026-10-12 every build step streamed its output, and the upgrade to
+0.3.1 printed screen after screen of it, almost all compiler warnings
+from JUCE's modules, HarfBuzz, and the VST3 SDK. `field-audiod` links
+`juce::juce_recommended_warning_flags`, and JUCE compiles its modules
+inside the target, so the strict warnings meant for Field's code hit
+JUCE's too.
+
+Each command a target runs to build, link, or set up, which `step` in
+`install.sh` wraps, writes its output to one log per run, made with
+`mktemp` in `$TMPDIR`. On a terminal, the command and its last five
+lines show dimmed under the rows as they arrive, redrawn in place and
+cut short of the terminal's width so no line wraps, and erased when the
+command ends, as Docker shows a build. The redraw moves up one row per
+line, so a line that wrapped would leave output behind. Bash cannot
+measure a character's width, so each line drawn is ASCII: a character
+outside it, such as CJK, which a terminal draws two columns wide, shows
+as `?`, and control characters are dropped. The width comes from `stty
+size`, then `COLUMNS`, then 80. Off a terminal, such as in a log
+or CI, nothing shows. A command that fails prints the end of its own
+output and the log's path, and the log stays. A target that succeeds
+removes it. `FIELD_VERBOSE=1` streams every line instead, and makes no
+log. The rows a target prints, such as `building`, `built`, and
+`switched`, are unchanged.
+
 ## 3 Releases and the one-line install
 
 These are chunks 2 to 4. They are designed far enough to show that

@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -73,6 +74,8 @@ const TOOLS = [
   'readlink',
   'tar',
   'gzip',
+  'mktemp',
+  'tail',
 ];
 
 let root: string;
@@ -127,7 +130,7 @@ case "$1 \${2:-}" in
     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
   "remove -g")
     rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
-  "install --frozen-lockfile") ;;
+  "install --frozen-lockfile") echo "Packages: +122"; echo "依存関係を解決しています、依存関係を解決しています" ;;
   "run build")
     mkdir -p "$dir/dist"
     node "$dir/scripts/stamp-build.mjs" > /dev/null
@@ -137,7 +140,7 @@ case "$1 \${2:-}" in
     mkdir -p "$dir/ui/dist"
     printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
   "run build:native")
-    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
+    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || { echo "cmake: JUCE did not compile" >&2; exit 2; }
     # Where native/audiod/CMakeLists.txt would have FetchContent put JUCE.
     mkdir -p "$dir/native/audiod/build"
     printf '%s\\n' "\${FIELD_FETCHCONTENT_BASE_DIR:-unset}" > "$dir/native/audiod/build/fetchcontent"
@@ -259,6 +262,7 @@ beforeEach(() => {
   git(root, 'clone', '--quiet', upstream, repo);
 
   mkdirSync(bin);
+  mkdirSync(join(root, 'tmp'));
   for (const tool of TOOLS) {
     const path = which(tool);
     if (path !== undefined) symlinkSync(path, join(bin, tool));
@@ -325,12 +329,47 @@ function install(target?: string, env: Record<string, string> = {}, script = joi
       FAKE_LOG: log,
       FAKE_PNPM_HOME: pnpmHome,
       FAKE_CLI: join(root, 'cli.js'),
+      TMPDIR: join(root, 'tmp'),
       ...env,
     },
   });
   return {
     status: result.status,
     stdout: result.stdout,
+    stderr: result.stderr,
+    log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+  };
+}
+
+// The installer in a pseudo-terminal, through script(1), whose arguments
+// differ between macOS and util-linux. Its output is the terminal's.
+const SCRIPT = which('script');
+function inTerminal(target: string, env: Record<string, string> = {}): Run {
+  if (SCRIPT === undefined) throw new Error('these tests need script(1) on PATH');
+  writeFileSync(log, '');
+  const command = [BASH, join(repo, 'install.sh'), target];
+  const args =
+    process.platform === 'darwin'
+      ? ['-q', '/dev/null', ...command]
+      : ['-qec', command.map((arg) => `'${arg.replace(/'/g, `'\\''`)}'`).join(' '), '/dev/null'];
+  const result = spawnSync(SCRIPT, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      PATH: [join(pnpmHome, 'bin'), bin].join(delimiter),
+      HOME: root,
+      GIT_CONFIG_NOSYSTEM: '1',
+      FAKE_LOG: log,
+      FAKE_PNPM_HOME: pnpmHome,
+      FAKE_CLI: join(root, 'cli.js'),
+      TMPDIR: join(root, 'tmp'),
+      TERM: 'xterm',
+      ...env,
+    },
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout.replace(/\r\n/g, '\n'),
     stderr: result.stderr,
     log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
   };
@@ -679,6 +718,54 @@ posix('install.sh audiod and workers', () => {
     const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
     expect(run.status).toBe(1);
     expect(rows(run.stdout).has('built')).toBe(false);
+  });
+
+  it('keeps build output off the screen, and removes its log once the target succeeds', () => {
+    const run = install('cli');
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain('Packages: +122');
+    expect(rows(run.stdout).has('linked')).toBe(true);
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
+  });
+
+  it("prints the end of a failed step's output, and keeps the log", () => {
+    const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(
+      'install.sh: pnpm --dir ~/checkout run build:native exited with status 2. The end of its output:\n\n  cmake: JUCE did not compile\n',
+    );
+    const logs = readdirSync(join(root, 'tmp'));
+    expect(logs).toHaveLength(1);
+    expect(run.stderr).toContain(`The whole log is in ${join(root, 'tmp', logs[0]!)}\n`);
+    expect(readFileSync(join(root, 'tmp', logs[0]!), 'utf8')).toBe(
+      `$ pnpm --dir ${repo} run build:native\ncmake: JUCE did not compile\n`,
+    );
+  });
+
+  it('draws build output in a dimmed window no wider than the terminal, and erases it', () => {
+    const run = inTerminal('cli', { COLUMNS: '24' });
+    expect(run.status).toBe(0);
+    // Each line the window draws: the escape that clears the row and
+    // dims, the text, and the escape that resets.
+    const drawn = [...run.stdout.matchAll(/\x1b\[2K\x1b\[2m(.*?)\x1b\[0m/g)].map((match) => match[1]!);
+    expect(drawn).toContain('  Packages: +122');
+    expect(drawn).toContain(`  ${'?'.repeat(19)}`);
+    for (const line of drawn) {
+      expect(line).toMatch(/^[\x20-\x7e]*$/);
+      expect(line.length).toBeLessThan(24);
+    }
+    // Erased, so nothing of the build is left among the rows after it.
+    const after = run.stdout.slice(run.stdout.lastIndexOf('\x1b[J'));
+    expect(after).not.toContain('Packages');
+    expect(rows(after.slice('\x1b[J'.length)).has('linked')).toBe(true);
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
+  });
+
+  it('shows every line of build output with FIELD_VERBOSE', () => {
+    const run = install('cli', { FIELD_VERBOSE: '1' });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain('Packages: +122\n');
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
   });
 
   it('re-syncs workers through the CLI, which knows which are set up', () => {
