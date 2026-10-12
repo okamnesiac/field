@@ -117,18 +117,159 @@ rerun() {
   fi
 }
 
-require_node() {
-  local version
-  version="$(node --version 2>/dev/null)" ||
-    die "Field needs Node $NODE_MAJOR or newer, and node is not on PATH" 69
-  version="${version#v}"
-  [ "${version%%.*}" -ge "$NODE_MAJOR" ] 2>/dev/null ||
-    die "Field needs Node $NODE_MAJOR or newer, and node is $version" 69
+# --- What the build needs (install.md "Before you install") ---
+#
+# One run names everything the machine lacks before anything downloads or
+# builds, rather than one tool a run or a failure minutes into the
+# daemon's build.
+
+OS="$(uname -s)"
+NEEDS=""
+BREW=""
+APT=""
+STEPS=""
+
+# need LABEL WHAT [BREW [APT [STEP]]]: one missing tool and what supplies
+# it. BREW is a Homebrew formula, APT the Debian and Ubuntu packages, and
+# STEP what to do on this platform when neither applies, a command or a
+# line starting with #.
+need() {
+  NEEDS="$NEEDS$(printf '  %-18s %s' "$1" "$2")"$'\n'
+  if [ "$OS" = Darwin ] && [ -n "${3:-}" ]; then
+    BREW="$BREW $3"
+  elif [ "$OS" != Darwin ] && [ -n "${4:-}" ]; then
+    APT="$APT $4"
+  elif [ -n "${5:-}" ]; then
+    STEPS="$STEPS$5"$'\n'
+  fi
 }
 
-require_pnpm() {
-  command -v pnpm >/dev/null 2>&1 ||
-    die "Field builds with pnpm, which is not on PATH — run corepack enable pnpm, or see https://pnpm.io/installation" 69
+check_node() {
+  local version
+  if ! version="$(node --version 2>/dev/null)"; then
+    need node-missing "Field needs Node $NODE_MAJOR or newer" node "" "# Node $NODE_MAJOR or newer, from https://nodejs.org/en/download"
+    return 0
+  fi
+  version="${version#v}"
+  [ "${version%%.*}" -ge "$NODE_MAJOR" ] 2>/dev/null ||
+    need node-old "Field needs Node $NODE_MAJOR or newer, and node is $version" node "" "# Node $NODE_MAJOR or newer, from https://nodejs.org/en/download"
+}
+
+# Node 25 and newer ship without corepack, so `corepack enable pnpm` is the
+# step only where corepack is on PATH.
+check_pnpm() {
+  local step="# pnpm, from https://pnpm.io/installation"
+  command -v pnpm >/dev/null 2>&1 && return 0
+  if command -v corepack >/dev/null 2>&1; then step="corepack enable pnpm"; fi
+  need pnpm-missing "Field builds with pnpm" pnpm "" "$step"
+}
+
+# The CMake version apt-get would install, or nothing without apt-cache or
+# a candidate. LC_ALL=C, because apt-cache translates "Candidate".
+apt_cmake() {
+  local candidate
+  command -v apt-cache >/dev/null 2>&1 || return 0
+  candidate="$(LC_ALL=C apt-cache policy cmake 2>/dev/null | sed -n 's/^ *Candidate: *//p')" || return 0
+  candidate="${candidate#*:}"
+  case "$candidate" in [0-9]*) printf '%s' "${candidate%%-*}" ;; esac
+}
+
+# Ubuntu 22.04 packages CMake 3.22 and Debian 11 3.18, so where apt-get
+# would install one too old, a missing CMake gets the step an old one does.
+check_cmake() {
+  local version packaged=""
+  if ! version="$(cmake_version)"; then
+    [ "$OS" = Darwin ] || packaged="$(apt_cmake)"
+    if [ -n "$packaged" ] && ! cmake_new_enough "$packaged"; then
+      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and apt-get would install $packaged" "" "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
+    else
+      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake
+    fi
+  elif ! cmake_new_enough "$version"; then
+    need cmake-old "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version" cmake "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
+  fi
+}
+
+# On macOS, Xcode's command line tools hold the compiler and git, and
+# /usr/bin/c++ and /usr/bin/git are stand-ins that offer to install them,
+# so the check asks xcode-select rather than running either.
+check_compiler() {
+  local dir
+  if [ "$OS" = Darwin ]; then
+    { dir="$(xcode-select -p 2>/dev/null)" && [ -d "$dir" ]; } ||
+      need xcode-missing "building field-audiod needs Xcode's command line tools, which hold the C++ compiler and git" "" "" "xcode-select --install"
+    return 0
+  fi
+  command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 ||
+    need compiler-missing "building field-audiod needs a C++20 compiler" "" build-essential
+  # build:native names no generator, so CMake takes CMAKE_GENERATOR's, or
+  # else Unix Makefiles, which runs make. A compiler installs without it.
+  [ -n "${CMAKE_GENERATOR:-}" ] || command -v make >/dev/null 2>&1 ||
+    need make-missing "building field-audiod runs make, CMake's default build tool on Linux" "" make
+}
+
+# CMake clones JUCE with git. On macOS, check_compiler covers it.
+check_git() {
+  [ "$OS" = Darwin ] || command -v git >/dev/null 2>&1 ||
+    need git-missing "building field-audiod clones JUCE with git" "" git
+}
+
+# JUCE's build helper links its GUI module whatever the daemon links, so a
+# console daemon still needs these headers on Linux. The packages are the
+# ones .github/workflows/ci.yml installs on Ubuntu, and each one installs
+# one of the pkg-config modules.
+HEADER_MODULES="alsa freetype2 fontconfig x11 xext xrandr xinerama xcursor xcomposite xrender glu"
+HEADER_PACKAGES="libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libxrender-dev libglu1-mesa-dev"
+
+check_headers() {
+  local module absent=""
+  [ "$OS" = Linux ] || return 0
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    need pkg-config-missing "building field-audiod finds JUCE's libraries with pkg-config" "" pkg-config
+    need headers-unchecked "without pkg-config, the installer cannot look for the ALSA, X11, and freetype development headers JUCE needs" "" "$HEADER_PACKAGES"
+    return 0
+  fi
+  for module in $HEADER_MODULES; do
+    pkg-config --exists "$module" 2>/dev/null || absent="$absent $module"
+  done
+  [ -z "$absent" ] ||
+    need headers-missing "JUCE needs the ALSA, X11, and freetype development headers, and pkg-config finds no$absent" "" "$HEADER_PACKAGES"
+}
+
+check_fetch() {
+  command -v curl >/dev/null 2>&1 || need curl-missing "installing a release downloads it with curl" curl curl
+  command -v tar >/dev/null 2>&1 || need tar-missing "installing a release unpacks it with tar" "" tar "# tar"
+}
+
+require_tools() {
+  local check
+  for check in "$@"; do "check_$check"; done
+  [ -n "$NEEDS" ] || return 0
+  {
+    echo "install.sh: this machine is missing what Field needs to build:"
+    echo
+    printf '%s' "$NEEDS"
+    echo
+    echo "Install what is missing:"
+    echo
+    if [ "$OS" = Darwin ]; then
+      printf '%s' "$STEPS" | sed 's/^/  /'
+      if [ -n "$BREW" ]; then
+        command -v brew >/dev/null 2>&1 || echo "  # Homebrew first, from https://brew.sh"
+        echo "  brew install$BREW"
+      fi
+    else
+      if [ -n "$APT" ]; then
+        command -v apt-get >/dev/null 2>&1 ||
+          echo "  # These are the Debian and Ubuntu packages; install the same with your distribution's package manager"
+        echo "  sudo apt-get install -y$APT"
+      fi
+      printf '%s' "$STEPS" | sed 's/^/  /'
+    fi
+    echo
+    echo "Then open a new shell and run $(rerun "$TARGET") again."
+  } >&2
+  exit 69
 }
 
 # pnpm refuses to link into a global bin directory that is not on PATH, so
@@ -152,14 +293,6 @@ cmake_new_enough() {
   minor="${minor%%.*}"
   [ "$major" -gt "$CMAKE_MAJOR" ] 2>/dev/null ||
     { [ "$major" -eq "$CMAKE_MAJOR" ] && [ "$minor" -ge "$CMAKE_MINOR" ]; } 2>/dev/null
-}
-
-require_cmake() {
-  local version
-  version="$(cmake_version)" ||
-    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer — brew install cmake on macOS" 69
-  cmake_new_enough "$version" ||
-    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version — brew upgrade cmake on macOS, or see https://cmake.org/download/" 69
 }
 
 install_cli() {
@@ -619,11 +752,6 @@ version_older() {
 
 is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
 
-require_fetch_tools() {
-  command -v curl >/dev/null 2>&1 || die "installing a release needs curl, which is not on PATH" 69
-  command -v tar >/dev/null 2>&1 || die "installing a release needs tar, which is not on PATH" 69
-}
-
 # The shim replaces only itself: a `field` someone else put in the bin
 # directory stops the installer before anything changes. So does a bin
 # directory it cannot write, because the shim is written after the switch.
@@ -945,25 +1073,21 @@ release_main() {
   release_init
   case "$TARGET" in
     all)
-      require_node
-      require_pnpm
-      require_cmake
-      require_fetch_tools
+      require_tools node pnpm compiler git cmake headers fetch
       require_shim_free
       install_release
       ;;
     # The other targets rebuild a piece of the installed version where it
     # is, as they rebuild a checkout, and say whether a newer release is out.
-    cli) require_node; require_pnpm; require_installed; build_cli; report_release "$(current_version)" ;;
+    cli) require_tools node pnpm; require_installed; build_cli; report_release "$(current_version)" ;;
     audiod)
-      require_pnpm
-      require_cmake
+      require_tools pnpm compiler git cmake headers
       require_installed
       export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"
       install_audiod
       report_release "$(current_version)"
       ;;
-    workers) require_node; require_installed; install_workers; report_release "$(current_version)" ;;
+    workers) require_tools node; require_installed; install_workers; report_release "$(current_version)" ;;
     status) show_release_status ;;
   esac
 }
@@ -974,18 +1098,16 @@ checkout_main() {
   # so a missing one stops it with nothing changed.
   case "$TARGET" in
     all)
-      require_node
-      require_pnpm
+      require_tools node pnpm compiler git cmake headers
       require_global_bin
-      require_cmake
       install_cli
       install_audiod
       install_workers
       report_checkout
       ;;
-    cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
-    audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
-    workers) require_node; install_workers; report_checkout ;;
+    cli) require_tools node pnpm; require_global_bin; install_cli; report_checkout ;;
+    audiod) require_tools pnpm compiler git cmake headers; install_audiod; report_checkout ;;
+    workers) require_tools node; install_workers; report_checkout ;;
     status) show_status ;;
   esac
 }

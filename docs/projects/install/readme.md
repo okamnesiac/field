@@ -80,11 +80,11 @@ and warning when the checkout is behind it. The installer never pulls.
 
 Each prerequisite is checked before anything changes, and a missing one
 stops the installer with exit status 69 and a message that names the
-fix: Node 24 or newer, pnpm (`corepack enable pnpm`), a pnpm global bin
-directory on PATH (`pnpm setup`), and CMake 3.24 or newer for `audiod`
-and `all`. A C++ compiler and the Linux development headers are not
-checked; the daemon build reports either one missing. An unknown target
-exits 64.
+fix: Node 24 or newer, pnpm, a pnpm global bin directory on PATH
+(`pnpm setup`), and for `audiod` and `all` CMake 3.24 or newer, a C++
+compiler, git, and on Linux make and JUCE's development headers. Every
+check runs before the installer stops, so one run names all that is
+missing (§3.4). An unknown target exits 64.
 
 ### 2.3 The CLI is a link to the checkout
 
@@ -327,6 +327,44 @@ than redirects, so the command is one request to `field.one`. It needs
 the repository to be public: `raw.githubusercontent.com` answers 404 for
 a private one. The website and the README then lead with this command.
 
+### 3.4 Missing dependencies (chunks 5 and 6)
+
+A release builds from source, so a first install on a new machine needs
+a toolchain, and the one-line install is where most people meet that.
+Before chunk 5 the installer stopped at the first missing tool, one tool
+a run, and never checked for a compiler, git, or the Linux headers, so a
+machine without them failed minutes into compiling JUCE. field.one
+listed the requirements under the command instead, which read as a
+reason not to run it.
+
+**Chunk 5 names everything missing.** Every check the target needs runs
+before the installer stops, and the message lists each missing or old
+tool with the commands that install them all: `xcode-select --install`
+and one `brew install` on macOS, and one `sudo apt-get install` with the
+Debian and Ubuntu package names on Linux, plus a line for what no
+package covers, such as Node 24, which Debian and Ubuntu package too
+old. For pnpm on Linux that line is `corepack enable pnpm` only where
+`corepack` is on PATH, because Node 25 and newer ship without Corepack
+(nodejs/node#57617), and pnpm's installation page otherwise. A missing
+CMake gets the `cmake` package, unless `apt-cache` says apt-get would
+install one older than 3.24, as Ubuntu 22.04 and Debian 11 would. Then
+it gets the cmake.org line an old CMake gets, so the next run does not
+reject what the first one installed. It checks Xcode's command line
+tools on macOS through `xcode-select -p`, never by running
+`/usr/bin/c++` or `/usr/bin/git`, which open an install dialog when the
+tools are absent. On Linux it checks for a C++ compiler, git, make
+unless `CMAKE_GENERATOR` names another generator, and through
+`pkg-config` the modules of the headers `ci.yml` installs. It installs
+nothing itself.
+
+**Chunk 6 offers to install them.** On macOS with Homebrew, the
+installer asks whether to run the `brew install` it would print, and
+runs it on a yes, then carries on with the install. Piped from curl,
+bash reads the script from stdin, so the question reads its answer from
+`/dev/tty`, and with no terminal the installer prints the commands as
+chunk 5 does. `xcode-select --install` opens a dialog and returns before
+the tools are in place, so it stays a printed step. Not started.
+
 ## 4 Why this design (DECIDED, 2026-10-11)
 
 - **A bash installer, as Projector has.** A Node script cannot run
@@ -467,13 +505,29 @@ Chunk 4:
 - `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
   first criterion says, and field.one leads with that command.
 
+Chunk 5:
+
+- On a machine missing several prerequisites, one run of any target
+  names every one its target needs, prints the commands that install
+  them for the platform, and exits 69 having changed nothing.
+- A missing compiler, git, or Linux header module stops the installer
+  before the daemon build rather than inside it.
+
+Chunk 6:
+
+- On macOS with Homebrew and a terminal, a run missing formulae asks to
+  install them, installs them on a yes, and goes on to install Field.
+- With no terminal, or on a no, it prints the commands as chunk 5 does.
+
 ## 6 Chunks
 
 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
 2. **Releases.** §3.1. Shipped in #205.
-3. **The release installer.** §3.2. This change.
-4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
-   chunk 3 released and a public repository.
+3. **The release installer.** §3.2. Shipped in #214.
+4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
+   in okamnesiac/audiofield#40.
+5. **Name everything missing.** §3.4. This change.
+6. **Offer to install it with Homebrew.** §3.4. Not started.
 
 ## 7 Open questions
 
@@ -545,11 +599,21 @@ in the release workflow with a warm cache lost to that cost, and the
 price of the local build, a release that depends on one machine, is one
 to pay only once binaries exist.
 
-### 7.4 Which domain serves the installer
+### 7.4 Which domain serves the installer (DECIDED, 2026-10-11)
 
-`field.one` is the marketing site (`apps/field-one`), and the
-repository's GitHub homepage says `field.amnes.ac`. This plan assumes
-`field.one`, where the waitlist for source access already lives.
+**Decided: `field.one` serves it.** `field.one` is Field's marketing
+site (`apps/field-one` in `okamnesiac/audiofield`), where people looking
+for Field arrive, and it held the source-access waitlist that the
+install command replaced. Chunk 4 shipped it in
+okamnesiac/audiofield#40: the site rewrites `/install.sh` to the
+installer at `v0` (§3.3) and leads with
+`curl -fsSL https://field.one/install.sh | bash`. The alternative was
+`field.amnes.ac`, the repository's GitHub homepage, which serves the
+repository's Projector site of plans and reviews, a page for people
+working on Field rather than for people installing it.
+
+`install.sh` and `docs/install.md` name the `raw.githubusercontent.com`
+URL that `field.one` proxies, so no code depends on the domain.
 
 ### 7.5 Worker environments across release versions (DECIDED, 2026-10-11)
 
