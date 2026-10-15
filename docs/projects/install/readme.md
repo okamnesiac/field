@@ -961,6 +961,21 @@ building it found.
   never meets the lag when it installs: it hands pipx
   `archive/v0.tar.gz`, which `github.com` resolves on each request, and
   reads its manifest from raw only to compare versions in `status`.
+- **The native builds use the selected toolchain's SDK.** After a macOS
+  27 update, the upgrade to 0.3.4 stopped at CMake's first compiler
+  check: `libSystem.tbd` in `MacOSX27.0.sdk` names an architecture,
+  `arm64e.x1`, that the linker did not know. `xcode-select` named Xcode
+  26.6, whose linker is `ld-1267` and whose newest SDK is 26.5, but the
+  update had installed Command Line Tools 27.0, and `xcrun
+  --show-sdk-path`, which CMake asks when nothing names an SDK, answered
+  with theirs. `xcrun --sdk macosx --show-sdk-path` answers within the
+  selected developer directory. `native/macos-sdk.cmake`, which both
+  native builds include before `project()`, sets `CMAKE_OSX_SYSROOT` to
+  that answer and exports it as `SDKROOT`, because JUCE configures
+  `juceaide` in a CMake of its own that is given no sysroot. `SDKROOT`,
+  or a `CMAKE_OSX_SYSROOT` someone set, wins, and the SDK is asked for
+  at every configure, so a checkout's build directory follows a later
+  Xcode update.
 
 ### 10.2 What was verified, and how
 

@@ -3,6 +3,7 @@
 # tag is the only thing expected to change. JUCE is AGPL — quarantined in
 # this daemon by design (architecture.md).
 cmake_minimum_required(VERSION 3.24)
+include(${CMAKE_CURRENT_LIST_DIR}/../macos-sdk.cmake)
 project(field-audiod VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)

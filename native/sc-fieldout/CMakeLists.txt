@@ -3,6 +3,7 @@
 # like the SuperCollider plugin interface it builds against (LICENSE);
 # the rest of Field is MIT.
 cmake_minimum_required(VERSION 3.22)
+include(${CMAKE_CURRENT_LIST_DIR}/../macos-sdk.cmake)
 project(sc-fieldout LANGUAGES CXX)
 
 if(WIN32)

@@ -89,8 +89,12 @@ same packages with its package manager. `all` needs everything below,
 - **A C++20 compiler, git, and make**, for `field-audiod`, whose build
   clones JUCE with git and runs make, the build tool CMake uses unless
   `CMAKE_GENERATOR` names another. On macOS, Xcode's command line tools
-  hold all three, and `xcode-select --install` installs them. On Linux,
-  `build-essential` holds the compiler and make.
+  hold all three, and `xcode-select --install` installs them. The build
+  uses the SDK that comes with the toolchain `xcode-select -p` names,
+  which its linker can read, even when a macOS update has installed
+  newer command line tools beside an older Xcode. Set `SDKROOT` to build
+  against another. On Linux, `build-essential` holds the compiler and
+  make.
 - **The ALSA, X11, and freetype development headers**, on Linux, which
   JUCE builds against. The installer looks for them with `pkg-config`,
   and the packages it names are the ones `.github/workflows/ci.yml`
