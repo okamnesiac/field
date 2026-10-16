@@ -1,0 +1,122 @@
+diff --git a/docs/install.md b/docs/install.md
+index 091d87a..7a63cce 100644
+--- a/docs/install.md
++++ b/docs/install.md
+@@ -89,8 +89,12 @@ same packages with its package manager. `all` needs everything below,
+ - **A C++20 compiler, git, and make**, for `field-audiod`, whose build
+   clones JUCE with git and runs make, the build tool CMake uses unless
+   `CMAKE_GENERATOR` names another. On macOS, Xcode's command line tools
+-  hold all three, and `xcode-select --install` installs them. On Linux,
+-  `build-essential` holds the compiler and make.
++  hold all three, and `xcode-select --install` installs them. The build
++  uses the SDK that comes with the toolchain `xcode-select -p` names,
++  which its linker can read, even when a macOS update has installed
++  newer command line tools beside an older Xcode. Set `SDKROOT` to build
++  against another. On Linux, `build-essential` holds the compiler and
++  make.
+ - **The ALSA, X11, and freetype development headers**, on Linux, which
+   JUCE builds against. The installer looks for them with `pkg-config`,
+   and the packages it names are the ones `.github/workflows/ci.yml`
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 490f5d7..35079fa 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -961,6 +961,24 @@ building it found.
+   never meets the lag when it installs: it hands pipx
+   `archive/v0.tar.gz`, which `github.com` resolves on each request, and
+   reads its manifest from raw only to compare versions in `status`.
++- **The native builds use the selected toolchain's SDK.** After a macOS
++  27 update, the upgrade to 0.3.4 stopped at CMake's first compiler
++  check: `libSystem.tbd` in `MacOSX27.0.sdk` names an architecture,
++  `arm64e.x1`, that the linker did not know. `xcode-select` named Xcode
++  26.6, whose linker is `ld-1267` and whose newest SDK is 26.5, but the
++  update had installed Command Line Tools 27.0, and `xcrun
++  --show-sdk-path`, which CMake asks when nothing names an SDK, answered
++  with theirs. `xcrun --sdk macosx --show-sdk-path` answers within the
++  selected developer directory. `native/macos-sdk.cmake`, which both
++  native builds include before `project()`, sets `CMAKE_OSX_SYSROOT` to
++  that answer and exports it as `SDKROOT`, because JUCE configures
++  `juceaide` in a CMake of its own that is given no sysroot. A
++  `CMAKE_OSX_SYSROOT` someone set wins, and then `SDKROOT`, which `xcrun`
++  resolves whether it is a path or an SDK's name. The SDK is resolved
++  at every configure, so a build directory follows `SDKROOT` or a later
++  Xcode update: CMake passes the cached value as `-isysroot`, which the
++  compiler prefers to `SDKROOT`, so a cache that kept the first answer
++  would ignore both.
+ 
+ ### 10.2 What was verified, and how
+ 
+diff --git a/native/audiod/CMakeLists.txt b/native/audiod/CMakeLists.txt
+index fff9e22..3e99cf9 100644
+--- a/native/audiod/CMakeLists.txt
++++ b/native/audiod/CMakeLists.txt
+@@ -3,6 +3,7 @@
+ # tag is the only thing expected to change. JUCE is AGPL — quarantined in
+ # this daemon by design (architecture.md).
+ cmake_minimum_required(VERSION 3.24)
++include(${CMAKE_CURRENT_LIST_DIR}/../macos-sdk.cmake)
+ project(field-audiod VERSION 0.1.0 LANGUAGES C CXX)
+ 
+ set(CMAKE_CXX_STANDARD 20)
+diff --git a/native/macos-sdk.cmake b/native/macos-sdk.cmake
+new file mode 100644
+index 0000000..61c4204
+--- /dev/null
++++ b/native/macos-sdk.cmake
+@@ -0,0 +1,44 @@
++# The macOS SDK a native build compiles against: the one that ships with
++# the toolchain xcode-select names, whose compiler and linker read it.
++# Included before project(), which reads CMAKE_OSX_SYSROOT.
++#
++# Asked for no SDK in particular, `xcrun --show-sdk-path` can answer with
++# the Command Line Tools' SDK while the compiler and linker are an
++# installed Xcode's. After a macOS update the Command Line Tools' SDK can
++# be newer than that Xcode's linker reads: macOS 27's lists arm64e.x1,
++# which Xcode 26.6's ld rejects, and CMake's first compiler check fails
++# (install.md §10.1). `xcrun --sdk macosx` answers within the selected
++# developer directory instead.
++#
++# A CMAKE_OSX_SYSROOT someone set wins, and then SDKROOT, which xcrun
++# resolves whether it names a path or an SDK. The SDK is resolved again
++# at every configure, so an existing build directory follows SDKROOT, a
++# later Xcode update, or an xcode-select switch: CMake passes the cached
++# value as -isysroot, which the compiler prefers to SDKROOT.
++# FIELD_OSX_SYSROOT remembers which value was this file's to replace.
++#
++# The SDK goes into SDKROOT too, for the processes configure starts:
++# JUCE configures and builds juceaide in a CMake of its own, which is
++# given no CMAKE_OSX_SYSROOT and would ask xcrun again.
++if(CMAKE_HOST_APPLE)
++  if(NOT CMAKE_OSX_SYSROOT OR CMAKE_OSX_SYSROOT STREQUAL "${FIELD_OSX_SYSROOT}")
++    if(DEFINED ENV{SDKROOT} AND NOT "$ENV{SDKROOT}" STREQUAL "")
++      set(field_sdk_query xcrun --show-sdk-path)
++    else()
++      set(field_sdk_query xcrun --sdk macosx --show-sdk-path)
++    endif()
++    execute_process(
++      COMMAND ${field_sdk_query}
++      OUTPUT_VARIABLE field_sdk
++      OUTPUT_STRIP_TRAILING_WHITESPACE
++      ERROR_QUIET
++      RESULT_VARIABLE field_sdk_status)
++    if(field_sdk_status EQUAL 0 AND IS_DIRECTORY "${field_sdk}")
++      set(CMAKE_OSX_SYSROOT "${field_sdk}" CACHE PATH "The macOS SDK of the toolchain xcode-select names" FORCE)
++      set(FIELD_OSX_SYSROOT "${field_sdk}" CACHE INTERNAL "")
++    endif()
++  endif()
++  if(CMAKE_OSX_SYSROOT AND NOT DEFINED ENV{SDKROOT})
++    set(ENV{SDKROOT} "${CMAKE_OSX_SYSROOT}")
++  endif()
++endif()
+diff --git a/native/sc-fieldout/CMakeLists.txt b/native/sc-fieldout/CMakeLists.txt
+index 5f43956..9421acf 100644
+--- a/native/sc-fieldout/CMakeLists.txt
++++ b/native/sc-fieldout/CMakeLists.txt
+@@ -3,6 +3,7 @@
+ # like the SuperCollider plugin interface it builds against (LICENSE);
+ # the rest of Field is MIT.
+ cmake_minimum_required(VERSION 3.22)
++include(${CMAKE_CURRENT_LIST_DIR}/../macos-sdk.cmake)
+ project(sc-fieldout LANGUAGES CXX)
+ 
+ if(WIN32)
