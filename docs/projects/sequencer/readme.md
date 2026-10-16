@@ -385,7 +385,7 @@ Rejected: **sequencing inside `field keys`.** `field keys` is the
 keyboard, and a sequencer needs no terminal. The two share the
 virtual-source code and the voice library instead.
 
-### 3.2 Parts are files of their own (PROPOSED, 2026-10-15, for Justin's decision)
+### 3.2 Parts are files of their own (DECIDED, 2026-10-15, Justin)
 
 A part is the file every writer and every player of notes agrees on.
 Writers write it whole: `field record` by copy, an editor, an agent, a
@@ -561,7 +561,9 @@ on each other.
 
 ## 7 Open questions
 
-1. **Parts in their own files** (§3.2). Justin decides. Blocks chunk 2.
+1. **Parts in their own files** (§3.2). Decided 2026-10-15 by Justin:
+   one file per part at `songs/<song>/notes/<name>.yaml`, placed by
+   `- notes: <name>`.
 2. **The engine sends MIDI from a schedule, rather than a clock event
    and a helper** (§3.1). Justin decides. Blocks chunks 4 and 5.
 3. **The instrument moves to the track, and takes land in ticks**
