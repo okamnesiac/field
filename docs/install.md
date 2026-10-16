@@ -89,8 +89,12 @@ same packages with its package manager. `all` needs everything below,
 - **A C++20 compiler, git, and make**, for `field-audiod`, whose build
   clones JUCE with git and runs make, the build tool CMake uses unless
   `CMAKE_GENERATOR` names another. On macOS, Xcode's command line tools
-  hold all three, and `xcode-select --install` installs them. On Linux,
-  `build-essential` holds the compiler and make.
+  hold all three, and `xcode-select --install` installs them. The build
+  uses the SDK that comes with the toolchain `xcode-select -p` names,
+  which its linker can read, even when a macOS update has installed
+  newer command line tools beside an older Xcode. Set `SDKROOT` to build
+  against another. On Linux, `build-essential` holds the compiler and
+  make.
 - **The ALSA, X11, and freetype development headers**, on Linux, which
   JUCE builds against. The installer looks for them with `pkg-config`,
   and the packages it names are the ones `.github/workflows/ci.yml`
@@ -431,7 +435,7 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | `not-on-path` | pnpm's global bin directory is not on your PATH. Run `pnpm setup`. |
 | `cli-current`, `cli-stale`, `cli-unbuilt` | Whether `dist/` was built from the checkout as it stands: the same commit, and the same number of uncommitted changes. `field --version` makes the same comparison. |
 | `ui-current`, `ui-stale`, `ui-missing` | Whether `ui/dist` holds a build, and whether any tracked file it may bundle is newer than that build: anything under `ui/` or `src/` other than a test, and `pnpm-lock.yaml`. The UI imports some of `src/`, and the check does not know which files, so an edit to a file it does not import also reads as stale. `field upgrade cli` rebuilds the UI and clears the row. |
-| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod`, `native/ring`, or `native/sc-fieldout` is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
+| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod`, `native/ring`, or `native/sc-fieldout`, or `native/macos-sdk.cmake`, which both native builds read, is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
 | `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
 | `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
 

@@ -619,7 +619,7 @@ report_audiod() {
     row audiod-override "FIELD_AUDIOD is set, so field runs $(tilde "$FIELD_AUDIOD") instead of this build"
   if [ ! -x "$binary" ]; then
     warn_row audiod-missing "field-audiod is not built — run $(rerun audiod)"
-  elif changed="$(newer_than "$binary" native/audiod native/ring native/sc-fieldout)"; then
+  elif changed="$(newer_than "$binary" native/audiod native/ring native/sc-fieldout native/macos-sdk.cmake)"; then
     warn_row audiod-stale "$changed changed since field-audiod was built — run $(rerun audiod)"
   else
     row audiod-current "$(tilde "$binary")"
