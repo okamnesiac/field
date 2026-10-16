@@ -1,0 +1,51 @@
+{
+ "version": 1,
+ "name": "Projector agent conventions",
+ "project": "",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 231,
+  "title": "Regenerate the Projector conventions block in AGENTS.md at template version 14",
+  "head": "7583812abded67306705e26f8c1c4beb12b4dd15",
+  "headRef": "update-projector-block",
+  "base": "454ab45b6d8e9bd82a0bc2346cde156559e24adf",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>AGENTS.md</code> tells agents how to work in this repository. Its generated Projector section came from an older template; this change refreshes it from version 4 to version 14 so agents use the current implementation and inbox workflows.",
+   "Only instructions change. The project layout, runtime code, and documentation under <code>docs/</code> stay as they were."
+  ],
+  "cards": []
+ },
+ "groups": [
+  {
+   "id": "agent-workflow",
+   "title": "Keep agent workflows current",
+   "kicker": "Regenerate the shared conventions and distinguish plugin-dependent rules.",
+   "intro": [
+    "Projector generates this block when you run <code>project init</code>. The reminder to change the upstream template now appears before the rules, where an agent sees it before attempting an edit.",
+    "A new <b>Projector skills</b> subsection applies when the plugin is installed. It routes changes through the implementation skill, which hands pull requests to a watch loop that handles findings. The draft-pull-request rule moves into that subsection without changing its wording.",
+    "The subsection also explains the inbox: use <code>ask</code> for decisions and <code>tell</code> for news the person must not miss, keep normal conversation alongside it, and withdraw or revise items when replies settle or clarify them."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "AGENTS.md",
+     "collapsed": false,
+     "note": "The repository’s agent instructions gain the template version 14 workflow and inbox rules.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Read the complete diff and confirmed that the draft rule moves unchanged; the documentation and stack rules remain intact."
+      },
+      {
+       "kind": "verify",
+       "text": "Ran project check at this head; it prints “Project plans are valid.”"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
