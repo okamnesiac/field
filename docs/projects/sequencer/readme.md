@@ -675,9 +675,9 @@ on each other.
    and parts share one notes file format and `notesFileSchema`. `part`
    was the alternative, and `clip` already means any placed window
    (clip-looping.md decision 1). Justin accepted `field sc voice` and
-   `field sc notes` on 2026-10-15 as fine for now. Still open at
-   review: `field seq`, the `Field Seq <song>/<track>` sources, and
-   `field seq --destination` and `--clock`. Blocks nothing.
+   `field sc notes` on 2026-10-15 as fine for now, and `field seq`, the
+   `Field Seq <song>/<track>` sources, and `field seq --destination`
+   and `--clock` on 2026-10-16 as fine for now. Blocks nothing.
 5. **Editing commands, such as quantize and transpose, and a piano
    roll.** Deferred: parts are text meanwhile, and the editor belongs
    to [detail-pane](../detail-pane/readme.md).
