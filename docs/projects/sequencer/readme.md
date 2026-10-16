@@ -1,5 +1,5 @@
 ---
-status: draft
+status: ready
 priority: now
 ---
 
@@ -7,8 +7,8 @@ priority: now
 
 **Goal:** a song holds written parts, notes in bars and beats that play
 through their track's instrument. Parts build like every other entry,
-and `field seq` plays them live through their voices while
-`field-audiod` sends each note on time.
+and `field seq` plays them live, through their voices or through
+external gear, while `field-audiod` sends each note on time.
 
 ## 1 Problem
 
@@ -56,10 +56,12 @@ ticks, so a take is a part that `field record` wrote and the ledger
 pins. To hear parts live, `field seq` plays the tracks you name through
 live SuperCollider voices. It compiles each track's notes into a
 sample-timed schedule, and `field-audiod` sends the schedule's MIDI on
-time from its audio callback, as it already plays the click. The voice
-host moves out of `field keys` into a library under `field sc`, so
-`field keys`, `field seq`, and a hardware controller drive voices the
-same way.
+time from its audio callback, as it already plays the click. The same
+schedules reach external gear: `field seq` can send a track's notes to
+a hardware synth's MIDI port, and MIDI clock to gear that runs its own
+patterns. The voice host moves out of `field keys` into a library under
+`field sc`, so `field keys`, `field seq`, and a hardware controller
+drive voices the same way.
 
 ### 2.1 Writing a part and hearing it
 
@@ -197,8 +199,9 @@ pinned and choosable.
 ### 2.5 The engine sends scheduled MIDI
 
 `field-audiod` gains MIDI outputs. The `midi_out` op opens an output
-under a name, or replaces the schedule of one already open, and the
-daemon publishes the output's virtual MIDI source:
+under a name, or replaces the schedule of one already open. An output
+sends from a virtual MIDI source the daemon publishes for it, or to a
+MIDI port that already exists, such as a hardware synth's:
 
 ```json
 { "op": "midi_out", "name": "seq:creek/keys", "source": "Field Seq creek/keys",
@@ -211,11 +214,13 @@ daemon publishes the output's virtual MIDI source:
 | Field | Meaning |
 | --- | --- |
 | `name` | The output's name, which `midi_out_close` and `status` use. |
-| `source` | The virtual MIDI source the daemon publishes for the output. |
+| `source` | The virtual MIDI source the daemon publishes for the output. An output takes `source` or `destination`, never both. |
+| `destination` | Instead of `source`: the name of an existing MIDI output port to send to, such as a hardware synth's. The daemon publishes nothing for it. |
 | `rate` | The rate `sample` counts in: the bed's timeline, as the click schedule's `rate` is. |
 | `events` | Each MIDI message and the bed sample it belongs to, in time order. At one sample, note-offs come first, then controller changes and bends, then note-ons, as `renderEvents` orders them. |
-| `lead` | Samples to send early for what the receiver adds before its sound reaches the daemon. For a SuperCollider voice that is its hardware buffer of 128 frames and one control block of 64. |
+| `lead` | Samples to send early for what the receiver adds before its sound reaches the daemon. For a SuperCollider voice that is its hardware buffer of 128 frames and one control block of 64. For a `destination`, it is the latency declared for the instrument on that port. |
 | `lead_input` | Optional. An input whose reader margin the output also leads by: a block plus 256 frames, which only the daemon knows, because the block can grow. |
+| `clock` | Optional. The MIDI clock pulses the output sends beside its events, described below. |
 
 Each block, the callback takes every event whose sample falls in the
 block's lookahead window, the block's span moved later by the lead. A
@@ -225,6 +230,22 @@ onto a lock-free queue with its exact time, which is the block's start
 on `juce::Time::getMillisecondCounterHiRes()` plus the event's offset:
 the clock MIDI capture already stamps against. A sender thread sends
 each message at its time.
+
+The daemon passes that exact time on to every receiver, and how it
+does so depends on the receiver. On macOS, CoreMIDI schedules a
+message sent to a destination for the host time stamped on it, and
+`getMillisecondCounterHiRes()` and CoreMIDI's host time both count
+`mach_absolute_time()`. So the sender thread hands a destination's
+events to CoreMIDI as soon as they are queued, each stamped with its
+time, through `MIDISendEventList` rather than JUCE's `MidiOutput`,
+which stamps every message with the current time. A virtual source's
+receivers can act on a message as it arrives, so the sender thread
+sleeps until each of a source's events is due, and does the same for a
+destination on other systems. The callback queues only the events due
+in its lookahead window, so CoreMIDI holds at most a block and the
+lead of a destination's events. On stop, pause, locate, a replaced
+schedule, and a close, the daemon unschedules them with
+`MIDIFlushOutput` before it sends the held notes' note-offs.
 
 The daemon keeps every note each output has started, and sends its
 note-off on stop, pause, locate, loop wrap, a replaced schedule,
@@ -236,9 +257,42 @@ millisecond after their time. MIDI capture leaves out the daemon's own
 outputs, so a take records what you play and not the part playing
 beside it. `hello.features` adds `midi-out`.
 
+An output can also carry MIDI clock, for gear that runs its own
+patterns, such as a drum machine or an arpeggiator: 24 timing pulses
+(`0xF8`) per quarter note. The CLI projects the tempo map into the
+pulses' samples, as it projects the click schedule
+(`clickScheduleSchema`), so the pulses follow every tempo change:
+
+```json
+{ "op": "midi_out", "name": "seq:creek/clock", "destination": "Digitakt",
+  "rate": 48000, "lead": 0, "events": [],
+  "clock": { "pulses": [0, 1000, 2000, 3000] } }
+{ "ok": true, "name": "seq:creek/clock", "events": 0, "pulses": 4 }
+```
+
+Pulse `i` sits at tick 40·i, a 24th of the 960-tick quarter note, so at
+120 bpm and 48 kHz the pulses are 1000 samples apart, 48 a second.
+Pulses go out only while the transport plays, and around them the
+daemon sends the transport's changes. Both pass through the lookahead
+window and the lead as events do.
+
+| When the transport | The daemon sends |
+| --- | --- |
+| Plays from pulse 0, the top of the song | Start (`0xFA`) |
+| Plays from anywhere else | Song Position Pointer (`0xF2`), then Continue (`0xFB`) |
+| Locates or wraps the loop while playing | Stop (`0xFC`), Song Position Pointer, then Continue |
+| Stops or pauses | Stop |
+
+Song Position Pointer counts sixteenth notes, 6 pulses each, so the
+pulse list is all the position the daemon needs. It names the first
+sixteenth at or after the transport's position, `ceil(i / 6)` for the
+next pulse `i`, and resumes the pulses at pulse 6 times that, so the
+gear's count and the song's agree. Stop comes first on a jump, so gear
+that ignores a position while it plays still moves.
+
 The daemon never learns what a note or a bar is. Like the click
-schedule, a MIDI schedule is samples and bytes, and the CLI projects
-the tempo map into it.
+schedule, a MIDI schedule and its clock are samples and bytes, and the
+CLI projects the tempo map into them.
 
 ### 2.6 Voices move into `field sc`
 
@@ -287,9 +341,26 @@ following creek · stopped at 1.1.1 · field transport play to start
   `field seq` prints the errors, as `field build --watch` does.
 - **`--midi-only`** publishes the sources and their schedules with lead
   0, starts no voices, opens no inputs, and leaves the session alone.
-  Use it to drive another application or a hardware synth from parts.
+  Use it to drive another application from parts.
+- **`--destination <track>=<port>`** sends a track's notes to an
+  existing MIDI port, such as a hardware synth's, instead of a voice:
+  `--destination bass="Minilogue XD"`. The track gets no voice and no
+  input, so the session keeps playing its rendered stem, as under
+  `--midi-only`. Its lead is 0, because nothing declares the synth's
+  latency yet.
+- **`--clock <port>`** sends MIDI clock to an existing MIDI port, so
+  gear that runs its own patterns follows the song. It shares the
+  output of a `--destination` on the same port. Repeat it for more
+  ports.
 - **Ctrl-C quits.** `field seq` closes its outputs and inputs and
   reloads the session.
+
+A synth on a `--destination` is not an instrument of its track yet.
+Spelling an external instrument on a track, with its port, channel,
+latency, and the inputs its audio returns on, and the realtime bounce
+that renders it, stay with
+[external-instruments](../external-instruments/readme.md). That project
+builds on this plan's `destination` and clock.
 
 Live playback approximates the build in four places, and the build
 stays exact in each:
@@ -325,6 +396,7 @@ any other.
 | --- | --- |
 | `src/schema/notes.ts` | One schema for takes and parts: musical-time fields, note names, the velocity default, and `sample_rate` only on takes recorded in samples. `formatNotesFile` writes ticks. |
 | `src/time/notes.ts` (new) | The resolver: a notes placement and its track's time to sample-timed events. The graph and `field seq` both call it. |
+| `src/time/clock.ts` (new) | The clock's projection: the tempo map to pulse samples, as `beatGrid` in `src/commands/click.ts` projects the click. |
 | `src/schema/track.ts` | `instrument` on the track, the `notes` entry kind in the arity check, and `loop` without `every` on a notes entry. |
 | `src/schema/record.ts` | `instrument` leaves the record entry. |
 | `src/model/project.ts` | Loads parts from `songs/<song>/notes/`, and validates notes entries, track instruments, and the moved field. |
@@ -334,17 +406,17 @@ any other.
 | `src/keys/targets.ts` | Read the instrument from the track. |
 | `src/sc/voice/` (new; from `src/keys/voice-host.ts`, `src/keys/routing.ts`), `sc/voice-host.scd` | The voice library, and the sources each voice plays from. |
 | `src/audiod/live-inputs.ts`, `src/graph/live.ts` | The four input prefixes, the `seq:` claim, and the schedule compile that places notes where the session places stems. |
-| `native/audiod/src/midi_out.cpp`, `midi_out.h` (new) | Outputs, their schedules, the sender thread, and the notes each output holds. |
-| `native/audiod/src/player.cpp`, `server.cpp`, `keys.cpp` | The callback's lookahead, the ops and the status, the `midi-out` feature, capture leaving out the daemon's own outputs, and the virtual-source code `--keys` shares. |
-| `src/audiod/protocol.ts`, `src/audiod/client.ts` | `midi_out`, `midi_out_close`, and the outputs in `status`. |
-| `src/commands/seq.ts` (new), `src/commands/sc.ts` (new, from `src/cli.ts`), `src/cli.ts` | `field seq`, `field sc voice`, and `field sc notes`. |
+| `native/audiod/src/midi_out.cpp`, `midi_out.h` (new) | Outputs to sources and destinations, their schedules and clocks, the sender thread, and the notes each output holds. |
+| `native/audiod/src/player.cpp`, `server.cpp`, `keys.cpp` | The callback's lookahead, the ops and the status, the `midi-out` feature, capture leaving out the daemon's own outputs, the virtual-source code `--keys` shares, and `--midi-monitor` printing each message's host time, with a `--destination` mode that publishes a virtual destination through CoreMIDI for tests and prints the timestamp each message carries. |
+| `src/audiod/protocol.ts`, `src/audiod/client.ts` | `midi_out` with its `destination` and `clock`, `midi_out_close`, and the outputs in `status`. |
+| `src/commands/seq.ts` (new), `src/commands/sc.ts` (new, from `src/cli.ts`), `src/cli.ts` | `field seq` with `--destination` and `--clock`, `field sc voice`, and `field sc notes`. |
 | `sc/notes-render.scd` (new) | The pattern harness. |
 | `docs/sequencer.md` (new), `docs/tracks.md`, `docs/project-model.md`, `docs/build-graph.md`, `docs/audio-engine.md`, `docs/keys.md`, `docs/cli.md`, `docs/README.md`, `AGENTS.md` | Parts, the track's instrument, takes in ticks, MIDI outputs, voices, and `field seq`, each in the chunk that ships it. |
 | `docs/projects/daw-features/readme.md` §15, `docs/projects/key-conforming/readme.md` | The corrected premise: parts conform by arithmetic and audio through the model. This plan's change makes it. |
 
 ## 3 Why this design
 
-### 3.1 The sequencer is its own program, and the engine keeps the deadline
+### 3.1 The sequencer is its own program, and the engine keeps the deadline (DECIDED, 2026-10-15, Justin)
 
 The sequencer does three jobs, and each pulls toward a different
 program. Holding notes is a file's job (§3.2). Writing them is every
@@ -359,18 +431,31 @@ its comment in `src/audiod/protocol.ts` says. The player stays
 artifacts-only (playback.md §1). The architecture's own rule points
 the same way: C++ for everything with a deadline.
 
-Rejected, pending Justin's decision (PROPOSED, 2026-10-15): **a `clock`
-event from the daemon, followed by a native helper,
-`field-audiod --seq`, that sends MIDI by it.** It keeps timing out of
-the engine by rebuilding the engine's clock in a second process: a
-host-time anchor broadcast, lookahead and flushes, wrap prediction
-from the loop region, notes late after play and locate by the time the
-event takes to arrive, and drift correction. The schedule needs none
-of that. The daemon also closes a gap the helper cannot: a hosted
-plugin instrument takes MIDI inside the callback, and a schedule
-already there feeds it with no round trip through a virtual source. What the schedule gives up is a clock that
-other programs can follow. Add the `clock` event when a program needs
-one.
+Rejected (DECIDED, 2026-10-15, Justin): **a `clock` event from the
+daemon, followed by a native helper, `field-audiod --seq`, that sends
+MIDI by it.** It keeps timing out of the engine by rebuilding the
+engine's clock in a second process: a host-time anchor broadcast,
+lookahead and flushes, wrap prediction from the loop region, notes late
+after play and locate by the time the event takes to arrive, and drift
+correction. The schedule needs none of that. The daemon also closes a
+gap the helper cannot: a hosted plugin instrument takes MIDI inside the
+callback, and a schedule already there feeds it with no round trip
+through a virtual source. What the schedule gives up is an event that
+tells other programs the host time of each position. MIDI clock (§2.5)
+gives them the tempo and the position, pulse by pulse. Add the `clock`
+event when a program needs more.
+
+External gear does not change the answer. A hardware synth's port is
+one more place a schedule goes, as a `destination` (§2.5), and on macOS
+CoreMIDI schedules each message the daemon stamps for its time, so a
+port keeps time at least as well as a virtual source. Gear that runs
+its own patterns needs MIDI clock, and the clock is one more schedule:
+pulses the CLI projects from the tempo map and the engine sends. The
+`clock` event serves programs, not instruments, so it stays deferred.
+When external-instruments builds the realtime bounce that
+build-graph.md "Render strategies" describes, in which "Field plays the
+MIDI at 1×, captures the return", the MIDI it plays is this same
+`midi_out` schedule.
 
 Rejected: **`field seq` sends MIDI on Node timers.** Garbage-collection
 pauses and timer jitter run to milliseconds, which is why
@@ -456,6 +541,9 @@ shared: `sc/voicer.scd` plays notes the same way live and offline
   the other way for outputs: from the callback to the sender thread.
 - **`--keys`'s virtual source** in `keys.cpp` is the code a MIDI output
   publishes its source with.
+- **The click's projection**, `beatGrid` in `src/commands/click.ts`,
+  projects each beat through the tempo map, as the clock's projection
+  does each pulse.
 
 ### 3.6 The live claim is the input's name
 
@@ -503,6 +591,10 @@ lifecycle of its own. Revisit it when start-up time or memory says so.
 | Stop, pause, locate, wrap, replace the schedule, close the output, and drop its connection, each with notes sounding. | Every note-on the source sent has its note-off. |
 | Give an output a `lead` and a `lead_input`. | Its events leave earlier by the lead plus the input's margin, in a unit test of the callback's selection with a fake clock. |
 | Arm a MIDI take while an output plays. | The take records `Field Keys` and none of the output's notes. |
+| Load one schedule into an output with a `source` and into one with a `destination`, a virtual destination that `field-audiod --midi-monitor --destination` publishes, and monitor both. | Each message's timestamp at the destination lies within 1 ms of the same message's arrival from the source, across a loop wrap too. The sender thread handed each destination event to CoreMIDI before its time. |
+| Stop the transport with a `destination` output's events handed over early. | None of them reaches the destination after the stop, in a unit test with a fake CoreMIDI. |
+| Project a clock from a song at 120 bpm, then from one that changes tempo at bar 5. | 48 pulses a second at 120 bpm. After the change, the pulses are spaced by the new tempo, in a projection unit test. |
+| In a 4/4 song, with `--midi-monitor` reading a clock from a virtual source: play from the top, stop, play from bar 3, locate to beat 2 of bar 9 while playing, wrap the loop, and pause. | Start; Stop; Song Position Pointer 32 and Continue; Stop, Song Position Pointer 132, and Continue; at the wrap, Stop, the loop start's position, and Continue; Stop. After each Continue, the next pulse is 6 times the position. No pulse goes out while stopped. |
 | Compile a session with `seq:creek/keys` open, then with `keys:creek/keys` open. | The first leaves out the track's notes renders and keeps its audio entries. The second keeps the renders. |
 | Run `field seq creek/track:keys`, then reload from `field play --watch`, then quit `field seq`. | The part plays once, live, through the reload. After the quit, the rendered stem plays. |
 | Edit a part while `field seq` plays it. | The new notes play from the next pass, with no stuck notes. |
@@ -512,9 +604,10 @@ lifecycle of its own. Revisit it when start-up time or memory says so.
 | By hand: play a part through `field seq` beside a copy of its track playing the rendered stem, and record the output through a loopback device. | Onsets in the two agree within 2 ms. |
 
 These tests fail before the change: the resolver tests, the notes
-entry and track `instrument` schema tests, the `midi_out` daemon tests
-(timing, note-offs, lead, capture exclusion), the session compile test
-for `seq:` inputs, and the voice-host source test. The daemon tests
+entry and track `instrument` schema tests, the clock projection test,
+the `midi_out` daemon tests (timing, note-offs, lead, capture
+exclusion, destinations, and the clock), the session compile test for
+`seq:` inputs, and the voice-host source test. The daemon tests
 skip by name where the machine has no virtual MIDI, as the
 `field keys` round trip does in a Linux container without the ALSA
 sequencer.
@@ -536,7 +629,11 @@ sequencer.
   five-minute part of 5,000 notes, which is 10,000 events, is about
   400 KB. Loads happen when `field seq` starts and when a file
   changes.
-- **The sender thread** sleeps between events.
+- **The sender thread** sleeps between events, and hands a
+  destination's events to CoreMIDI as they are queued.
+- **A clock** is 24 pulses per quarter note, 48 a second at 120 bpm:
+  one cursor step per pulse in the callback, and about 130 KB of JSON
+  for five minutes at 120 bpm, which is 14,400 pulses.
 - **Voices** cost one `scsynth` per running command that hosts them
   (§3.8).
 
@@ -553,10 +650,10 @@ on each other.
 3. **Voices in `field sc`.** The library, the sources each voice plays
    from, and `field sc voice`.
 4. **MIDI outputs in the engine.** `midi_out`, `midi_out_close`, the
-   sender thread, held notes, lead, and capture leaving out the
-   daemon's own outputs.
-5. **`field seq`.** Needs chunks 2, 3, and 4. Writes
-   `docs/sequencer.md`.
+   sender thread, held notes, lead, destinations, MIDI clock, and
+   capture leaving out the daemon's own outputs.
+5. **`field seq`.** Needs chunks 2, 3, and 4. Includes `--destination`,
+   `--clock`, and the clock's projection. Writes `docs/sequencer.md`.
 6. **`field sc notes`.** Needs chunk 2.
 
 ## 7 Open questions
@@ -565,19 +662,28 @@ on each other.
    one file per part at `songs/<song>/notes/<name>.yaml`, placed by
    `- notes: <name>`.
 2. **The engine sends MIDI from a schedule, rather than a clock event
-   and a helper** (§3.1). Justin decides. Blocks chunks 4 and 5.
+   and a helper** (§3.1). Decided 2026-10-15 by Justin, and extended to
+   external instruments: the engine sends every instrument's notes from
+   schedules, to virtual sources and hardware destinations alike, and
+   sends MIDI clock for external gear (§2.5).
 3. **The instrument moves to the track, and takes land in ticks**
    (§3.3, §3.4). Decided 2026-10-15 by Justin: the instrument is the
    track's, and MIDI takes land in ticks.
 4. **Names**: `field seq`, the `notes:` entry, `songs/<song>/notes/`,
-   the `Field Seq <song>/<track>` sources, `field sc voice`, and
-   `field sc notes`. Justin decides at review. Blocks nothing.
+   the `Field Seq <song>/<track>` sources, `field seq --destination`
+   and `--clock`, `field sc voice`, and `field sc notes`. Justin decides
+   at review. Blocks nothing.
 5. **Editing commands, such as quantize and transpose, and a piano
    roll.** Deferred: parts are text meanwhile, and the editor belongs
    to [detail-pane](../detail-pane/readme.md).
-6. **Hardware synths.** `field seq --midi-only` drives them. A declared
-   audio return and a realtime bounce stay with
-   [external-instruments](../external-instruments/readme.md).
+6. **Hardware synths.** `field seq --destination` sends a track's
+   notes to a synth's MIDI port, `--clock` sends MIDI clock to gear
+   that runs its own patterns, and `--midi-only` still drives other
+   applications through the virtual sources. Spelling an external
+   instrument on a track, with its port, channel, latency, and the
+   inputs its audio returns on, and its realtime bounce stay with
+   [external-instruments](../external-instruments/readme.md), which
+   builds on `destination` and the clock.
 7. **Hosted plugin instruments.** Deferred to
    [plugin-hosting](../plugin-hosting/readme.md), which hosts inserts
    only. A schedule is already the shape their MIDI takes, live and in
@@ -617,6 +723,12 @@ Read on 2026-10-15, at `566d90c`:
   list of sample positions. MIDI capture stamps each message against
   the block's start on `juce::Time::getMillisecondCounterHiRes()`
   (`Player::processBlock`, `Player::stampMidiBlock`).
+- **JUCE sends MIDI at once.** JUCE 8.0.4's `MidiOutput` stamps each
+  CoreMIDI packet with the current host time, and its `MidiInput`
+  stamps each message with its arrival rather than the packet's
+  timestamp (`juce_CoreMidi_mac.mm`). `getMillisecondCounterHiRes()`
+  reads `mach_absolute_time()` on macOS (`juce_SystemStats_mac.mm`),
+  the clock CoreMIDI's host time counts.
 - **The daemon publishes no clock.** The `position` event is a bare
   sample count, sent from a 250 ms timer in `native/audiod/src/main.cpp`
   while the transport plays, with no time of day attached.
