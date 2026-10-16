@@ -872,7 +872,7 @@ posix('install.sh status', () => {
     );
   });
 
-  it('counts the ring header and FieldOut, which the same build compiles, as daemon sources', () => {
+  it('counts the ring header, FieldOut, and the macOS SDK file, which the same build reads, as daemon sources', () => {
     install();
     const built = new Date(Date.now() - 30_000);
     const sources = new Date(Date.now() - 60_000);
@@ -891,6 +891,13 @@ posix('install.sh status', () => {
     git(repo, 'commit', '--quiet', '-m', 'FieldOut');
     expect(rows(install('status').stdout).get('audiod-stale')).toBe(
       'native/sc-fieldout/FieldOut.cpp changed since field-audiod was built — run field upgrade audiod',
+    );
+    utimesSync(join(repo, 'native/sc-fieldout/FieldOut.cpp'), sources, sources);
+    write(join(repo, 'native/macos-sdk.cmake'), '');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'the SDK');
+    expect(rows(install('status').stdout).get('audiod-stale')).toBe(
+      'native/macos-sdk.cmake changed since field-audiod was built — run field upgrade audiod',
     );
   });
 
