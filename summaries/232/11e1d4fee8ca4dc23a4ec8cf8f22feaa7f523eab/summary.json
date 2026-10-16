@@ -1,0 +1,90 @@
+{
+ "version": 1,
+ "name": "Written parts and live sequencing",
+ "project": "sequencer",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 232,
+  "title": "Plan the sequencer: written parts, field seq, and MIDI the engine sends on time",
+  "head": "11e1d4fee8ca4dc23a4ec8cf8f22feaa7f523eab",
+  "headRef": "plan-sequencer",
+  "base": "c7a95e1ec72acbf33666f8372b756930f0475a53",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field records performed notes as immutable MIDI takes and renders them to audio. This draft adds a plan for parts you can write, edit, generate, and place in a song. Musical timing lets those notes follow tempo edits.",
+   "The build and <code>field seq</code> share one resolver that turns notes into sample times. The audio daemon sends schedules to virtual sources or hardware MIDI ports, including clock pulses for gear that runs its own patterns. Shared SuperCollider voices turn MIDI into sound. This pull request changes plans only."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms in this plan",
+    "html": "<ul><li><b>Part:</b> an editable notes file placed on a track.</li><li><b>Take:</b> a recorded performance whose bytes the ledger pins.</li><li><b>Voice:</b> a running instrument that receives MIDI and produces audio.</li><li><b>Schedule:</b> MIDI messages with sample positions on the song timeline.</li></ul>"
+   },
+   {
+    "id": "decisions",
+    "title": "Ready plan and remaining question",
+    "html": "The plan is <code>ready</code>. Architecture decisions and the names <code>notes</code>, <code>field sc voice</code>, and <code>field sc notes</code> are recorded. Section 7.4 still leaves <code>field seq</code>, its source names, <code>--destination</code>, and <code>--clock</code> open at review. The readiness finding remains until those decisions are recorded or explicitly deferred to implementation."
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "sequencer",
+   "title": "Write parts and play them live",
+   "kicker": "One notes format feeds both rendered audio and live instruments.",
+   "intro": [
+    "A part is an editable file of notes in musical time. Placing it on a track gives it an instrument and an anchor in the arrangement. Recorded MIDI takes adopt ticks too, while older sample-timed takes keep their existing playback.",
+    "For live playback, <code>field seq</code> resolves the arrangement into sample-timed MIDI messages. The daemon sends them against its audio clock to virtual sources or existing hardware ports. A shared voice library hosts software instruments; an open <code>seq:</code> input suppresses matching rendered notes. Destination routing opens no audio input and leaves the rendered stem playing.",
+    "The six rollout chunks separate the notes format, parts, voice library, MIDI outputs, sequencer command, and pattern-to-part command. The plan also states the live path’s limits: different placement mixes cannot be preserved individually, release tails can ring, notes under a locate stay silent, and the initial lead can be late.",
+    "MIDI clock adds 24 pulses per quarter note plus Start, Stop, Song Position Pointer, and Continue messages. The plan uses CoreMIDI future timestamps for hardware destinations on macOS, flushes queued events on transport changes, and defines tests for timestamp delivery, cancellation, pulse spacing, and transport positioning. External instrument declarations, audio returns, latency setup, and realtime bounce remain separate work."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/sequencer/readme.md",
+     "collapsed": false,
+     "note": "Read the workflows and contracts in §2, the proposed decisions in §3, and the acceptance and rollout tables in §§4–7.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 680,
+       "text": "The ready plan still leaves field seq, its virtual-source names, --destination, and --clock open at review. Record those decisions or explicitly defer them to implementation."
+      },
+      {
+       "kind": "verify",
+       "line": 2,
+       "text": "Confirmed with project show that sequencer remains ready. The review rechecks every question; notes and the SuperCollider command names are now answered."
+      },
+      {
+       "kind": "context",
+       "line": 650,
+       "text": "The engine output chunk includes hardware destinations and MIDI clock; the sequencer command chunk includes destination routing and clock projection."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "conforming",
+   "title": "Choose the transform by material",
+   "kicker": "Written notes transpose directly; audio keeps the model path.",
+   "intro": [
+    "Conforming means moving imported material into the song’s key. Written notes already expose their pitches, so transposing them is arithmetic. Audio still needs the planned model transform.",
+    "The feature catalogue records why the earlier all-material model premise changed, and the key-conforming project’s goal adopts the same distinction. Neither project advances from draft."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/daw-features/readme.md",
+     "note": "Section 15 corrects the premise that sequenced material is an exception, preserving the reason for the decision change."
+    },
+    {
+     "path": "docs/projects/key-conforming/readme.md",
+     "note": "The goal now distinguishes transposing parts from transforming recorded audio."
+    }
+   ]
+  }
+ ]
+}
