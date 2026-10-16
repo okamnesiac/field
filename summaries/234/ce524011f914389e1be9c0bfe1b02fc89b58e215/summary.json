@@ -1,0 +1,165 @@
+{
+ "version": 1,
+ "name": "Live notes and MIDI sequencing",
+ "project": "sequencer",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 234,
+  "title": "Send scheduled MIDI and MIDI clock from field-audiod's audio callback (sequencer.md chunk 4)",
+  "head": "ce524011f914389e1be9c0bfe1b02fc89b58e215",
+  "headRef": "seq-midi-out",
+  "base": "829267cd4b62a9fc169e4bf96534b568bda14590",
+  "baseRef": "seq-notes",
+  "basePr": 233
+ },
+ "overview": {
+  "summary": [
+   "This layer adds the daemon’s scheduled MIDI output engine. Callers submit sample-positioned events through <code>midi_out</code>, choose a virtual source or destination, and close the output with <code>midi_out_close</code>.",
+   "The audio callback selects event windows; a sender delivers messages and MIDI clock. This layer builds on #233’s note model. The <code>field seq</code> projection and command callers remain later work."
+  ],
+  "cards": [
+   {
+    "id": "timing",
+    "title": "Timing vocabulary",
+    "html": "<ul class=\"tight\"><li><b>Schedule:</b> MIDI bytes indexed by transport sample.</li><li><b>Lead:</b> advance delivery by a configured number of samples.</li><li><b>Clock:</b> tick and transport messages that follow playback and loop position.</li></ul>"
+   },
+   {
+    "id": "validation",
+    "title": "Review at ce52401",
+    "html": "Native build, typecheck, project validation, native self-test, and 24 focused tests pass, with one environmental skip. Two fake-sink probes expose loop-boundary and sustain-pedal teardown defects. Physical MIDI hardware and other operating systems were not tested."
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "Define output schedules",
+   "kicker": "Start with the wire contract and ownership",
+   "intro": [
+    "The TypeScript client validates schedules before sending them. The native model separates events, loop/clock settings, and output state so replacement schedules can retain their port."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/protocol.ts"
+    },
+    {
+     "path": "src/audiod/client.ts"
+    },
+    {
+     "path": "native/audiod/src/midi_out.h"
+    }
+   ]
+  },
+  {
+   "id": "sender",
+   "title": "Select and deliver MIDI events",
+   "kicker": "Read the scheduling engine before its callers",
+   "intro": [
+    "<code>MidiOutputs</code> takes callback windows, queues timestamped messages, and uses a sender thread for delivery. It tracks held notes and future note-offs so interruption can end notes whose release was queued ahead."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "native/audiod/src/midi_out.cpp",
+     "note": "Follow selection, loop wrapping, sender delivery, and teardown in that order.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 500,
+       "text": "P2: A wrap exactly at the window end returns before boundary cleanup and clock repositioning. A 1024-sample loop in 512-frame blocks reproduces repeated note-ons without the intervening note-off."
+      },
+      {
+       "kind": "flag",
+       "line": 663,
+       "text": "P2: Teardown tracks held keys but not CC64 sustain. A released note under the pedal survives stop, locate, or close; the probe observes no pedal release."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "callback",
+   "title": "Connect output to playback",
+   "kicker": "Transport position and callback timing feed selection",
+   "intro": [
+    "The player passes playback windows, loop position, and timing margins to MIDI outputs. Live routing and ring input expose the information needed to avoid recording the daemon’s own virtual sources."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "native/audiod/src/player.cpp"
+    },
+    {
+     "path": "native/audiod/src/player.h"
+    },
+    {
+     "path": "native/audiod/src/live.h"
+    },
+    {
+     "path": "native/audiod/src/ring_input.h"
+    }
+   ]
+  },
+  {
+   "id": "integration",
+   "title": "Wire requests and monitor timestamps",
+   "kicker": "Daemon lifetime, IPC, and native build targets",
+   "intro": [
+    "The server handles output requests and connection cleanup. The daemon owns output lifetime; the keys helper preserves source identity and timestamp information for monitoring."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "native/audiod/src/server.cpp"
+    },
+    {
+     "path": "native/audiod/src/main.cpp"
+    },
+    {
+     "path": "native/audiod/src/keys.cpp"
+    },
+    {
+     "path": "native/audiod/src/keys.h"
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt"
+    }
+   ]
+  },
+  {
+   "id": "evidence",
+   "title": "Exercise and document the engine",
+   "kicker": "Tests and current behavior references",
+   "intro": [
+    "The tests cover validation, port lifecycle, scheduling, clock, and CoreMIDI integration. Documentation records the daemon API and the completed engine slice while keeping the CLI projection as future work."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Built native targets and ran the daemon self-test, typecheck, project check, and the MIDI output, helper, and MIDI recording suites: 24 passed, one environmental skip."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/audiod/midi-out.test.ts"
+    },
+    {
+     "path": "src/keys/helper-native.test.ts"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "docs/audio-engine.md"
+    },
+    {
+     "path": "docs/keys.md"
+    },
+    {
+     "path": "docs/projects/sequencer/readme.md"
+    }
+   ]
+  }
+ ]
+}
