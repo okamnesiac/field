@@ -387,10 +387,13 @@ bends: []
 tempo map, after it takes off the output latency: you play in time with
 what you hear, which runs behind the playhead by that much. A note you
 press that early in the take's first moments starts with the take. The
-row's `musical_position` is where the take starts on its track, in the
-track's own time, and the take plays from there, so it follows a tempo
-edit as a part does. `started_at_samples` and `latency` stay in the row
-as the record of where the take was captured.
+row's `started_at_ticks` is where the take starts, in ticks after the
+record entry's `at`, and the take plays from there. So moving the
+entry's `at` moves the take by the same musical distance, as it moves
+an audio take, and the take follows a tempo edit as a part does.
+`started_at_samples`, `latency`, and `musical_position`, where the take
+started on its track in the track's own time, stay in the row as the
+record of where the take was captured.
 
 A take starts where your knobs were: its first `controls` rows, at
 `at: 0`, are each controller's value when the take started, which the
@@ -503,7 +506,9 @@ render, so a loop in a steady song is one render, and the repetitions
 after a tempo change play `gen:<track>-<n>` or `gen:<track>-<id>-<n>`,
 named for the first repetition `<n>` that plays it.
 
-To edit a take, copy it into a part and place the part at the take's
+To edit a take, copy it into a part and place the part where the take
+plays, `started_at_ticks` after the record entry's `at`. While the
+entry has not moved since you recorded the take, that is the take's
 `musical_position`. Then mute the record entry, or delete it:
 
 ```console

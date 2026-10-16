@@ -73,8 +73,9 @@ the kind lives in the field name, never in a value prefix:
   `- record:`. On a track with an `instrument:` it records what is
   played on `field keys` or a controller, and you hear it through that
   instrument; on a track without one it records audio.
-  `field record` fills its takes, the entry plays the chosen one at the
-  position it was played, and an entry with no takes yet plays silence.
+  `field record` fills its takes, the entry plays the chosen one where
+  it was played, counted from the entry's `at`, so moving the entry
+  moves its takes, and an entry with no takes yet plays silence.
   A MIDI take sounds through a `gen:` node the build renders from it.
   `check` refuses `instrument:` under `record:` and says to move it to
   the track. See [project-model.md](project-model.md) "Recorded takes".

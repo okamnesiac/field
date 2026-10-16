@@ -179,12 +179,19 @@ today.
 `field record` converts each captured time to ticks through the song's
 tempo map, after it subtracts the output latency, and writes the take
 in scalar ticks from the take's start. The takes row keeps
-`started_at_samples` as the record of where the take was captured. For
-a MIDI take, `musical_position` and the notes' ticks are authoritative,
-so a take follows a tempo edit as a part does. A tick is 0.52 ms at
-120 bpm, finer than the timing a player controls.
+`started_at_samples` as the record of where the take was captured, and
+`started_at_ticks`, where the take starts in ticks after its record
+entry's `at`. For a MIDI take, `started_at_ticks` and the notes' ticks
+are authoritative, so a take moves with its record entry by the same
+musical distance, as an audio take moves with its entry, and follows a
+tempo edit as a part does (corrected 2026-10-16, Justin: this section
+made `musical_position` authoritative, which left a take where it was
+captured when its entry moved). A tick is 0.52 ms at 120 bpm, finer
+than the timing a player controls.
 
-To edit a take, copy it into a part and place the part at the take's
+To edit a take, copy it into a part and place the part where the take
+plays, `started_at_ticks` after the record entry's `at`. While the
+entry has not moved since the take was recorded, that is the take's
 `musical_position`:
 
 ```console
@@ -585,7 +592,7 @@ lifecycle of its own. Revisit it when start-up time or memory says so.
 | Place the same part at bars 1 and 17 of a constant-tempo song. | The second placement is a cache hit. |
 | Place a part across a meter change from 4/4 to 7/8. | The part's second bar starts at the bar line after the change, in a resolver unit test. |
 | Run `field check` on a notes entry on a track without an instrument, a missing part, a note name that is not one, and `record: { instrument: pad }`. | Four errors. The last names the move to the track. |
-| Record a MIDI take, then edit the tempo. | The take lands in ticks and follows the tempo edit. A take with `sample_rate:` renders as before, and its tests pass unchanged. |
+| Record a MIDI take, then edit the tempo, then move its record entry. | The take lands in ticks and follows the tempo edit. It moves with its entry by the same musical distance. A take with `sample_rate:` renders as before, and its tests pass unchanged. |
 | Copy a take into a part and place it at the take's position (§2.4). | The part's render has the take's action key. |
 | Load a schedule with lead 0 and record a MIDI take from its source in the same daemon. | Every captured note lies within 48 samples (1 ms at 48 kHz) of its scheduled sample, across a loop wrap too, and `status` reports 0 `late`. |
 | Stop, pause, locate, wrap, replace the schedule, close the output, and drop its connection, each with notes sounding. | Every note-on the source sent has its note-off. |
@@ -767,16 +774,22 @@ loosely:
   from there. A note heard before that point, because it was pressed in
   the take's first moments, starts with the take; a note that ended
   before it is dropped.
-- **A MIDI take's position is on its track, in the track's own time.**
+- **A MIDI take starts `started_at_ticks` after its record entry.**
   `field record` converts captured times through the recording track's
   tempo map, which is the song's for every track without `time:` (§2.4
-  says "the song's"), and from the track's zero, as an `at` in that
-  track's file counts. So `musical_position` is the `at` that places a
-  copy of the take as a part on the same track (§2.4). An audio take's
-  `musical_position` stays what the song's map said at capture. A take
-  in ticks plays from `musical_position`, so moving its record entry's
-  `at` no longer moves it; the entry's other placement fields still
-  apply, and a take in samples still moves with the entry.
+  says "the song's"). It writes where the take started as
+  `started_at_ticks`, counted from the tick the record entry's window
+  starts on; an absolute entry counts from the whole tick its sample
+  falls on. The take plays from there, so moving the record entry moves
+  the take by the same musical distance, and a tempo edit keeps its
+  notes on their beats (Justin, 2026-10-16: a take that its entry could
+  not move "sounds totally wrong"). `musical_position` records where the
+  take started on its track, in the track's own time, so while the
+  entry has not moved it is the `at` that places a copy of the take as
+  a part on the same track (§2.4). An audio take's `musical_position`
+  stays what the song's map said at capture. A take in samples has no
+  `started_at_ticks`, and moves with its entry by its sample row, as an
+  audio take does.
 - **The render is keyed on events and on the notes file.** A
   `voice-render` node's parameters are the instrument and `events`, the
   notes resolved for the placement in samples from its start. The notes
@@ -837,5 +850,5 @@ The first seven rows of §4 pass, each in a test:
 | One part at bars 1 and 17 of a steady song | `src/graph/parts.test.ts`, "is one render where two placements resolve alike" |
 | A part across a change from 4/4 to 7/8 | `src/time/notes.test.ts`, "starts the part's second bar at the bar line after a meter change" |
 | The four `field check` errors | `src/graph/parts.test.ts`, "refuses a notes entry with no instrument, a missing part, a note name that is not one, and an instrument on record:" |
-| A MIDI take, then a tempo edit; a take in samples | `src/commands/land.test.ts`, "writes the take in ticks"; `src/generators/voice-render.test.ts`, "follows a tempo edit there" and "plays a take recorded in samples as it was recorded" |
+| A MIDI take, then a tempo edit, then its entry moved; a take in samples | `src/commands/land.test.ts`, "writes the take in ticks" and "counts started_at_ticks from the tick its record entry starts on"; `src/generators/voice-render.test.ts`, "follows a tempo edit there", "moves with its record entry by the same musical distance", and "plays a take recorded in samples as it was recorded" |
 | A take copied into a part at its position | `src/graph/parts.test.ts`, "has the take's action key when it is placed at the take's position" |

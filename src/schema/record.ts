@@ -75,14 +75,18 @@ export const audioTakeRowSchema = z.strictObject({
 // because a player presses a key in time with what they hear, and MIDI
 // has no input latency worth the name. A take in ticks (sequencer.md
 // §2.4) has the latency taken off its notes already, and plays from
-// `musical_position`, where it starts on its track in the track's own
-// time: both are authoritative, so the take follows a tempo edit, and
-// `started_at_samples` and `latency` are its record. A take whose notes
-// file carries `sample_rate:` places by sample arithmetic, as an audio
-// take does.
+// `started_at_ticks`, where it starts in ticks counted from the whole
+// tick its record entry's window starts on. The two are authoritative,
+// so the take moves with its entry by the same musical distance and
+// follows a tempo edit. `started_at_samples`, `latency`, and
+// `musical_position`, where it started on its track in the track's own
+// time, are its record. A take whose notes file carries `sample_rate:`
+// places by sample arithmetic, as an audio take does, and has no
+// `started_at_ticks`.
 export const midiTakeRowSchema = z.strictObject({
   asset: takeName,
   started_at_samples: z.number().int(),
+  started_at_ticks: z.number().int().optional(),
   musical_position: musicalPosition,
   latency: z.number().int().min(0),
   sources: z.array(z.string().min(1)),
@@ -120,6 +124,7 @@ export const recordTakesOrder: KeyOrder = {
         keys: [
           'asset',
           'started_at_samples',
+          'started_at_ticks',
           'musical_position',
           'latency',
           'device',

@@ -12,6 +12,7 @@ import type { TrackTime } from '../graph/graph.js';
 import { loadProject, recordTakesPath, type LoadedProject, type LoadedSong } from '../model/project.js';
 import { recordTakesOrder, recordTakesSchema, type InputEntry, type RecordedTake } from '../schema/index.js';
 import { formatNotesFile, notesFromMessages, type CapturedMessage, type TimedNotes } from '../schema/notes.js';
+import { entryTick } from '../time/notes.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import { appendLedgerRow, openLedger } from './import.js';
@@ -359,8 +360,11 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
 // that early in the take's first moments starts with the take, and one
 // that ended before the take began is dropped. Its one writer writes the
 // file once, pinned in the ledger by hash like any take, with no WAV
-// facts. The row's musical_position is where the take starts on the
-// track, in the track's own time, which is where its notes play from.
+// facts. The row's started_at_ticks is where the take starts, counted
+// from the tick its record entry's window starts on, which is where its
+// notes play from, so the take moves with the entry; its
+// musical_position records where that was on the track, in the track's
+// own time.
 export async function landMidiTake(root: string, take: MidiTake): Promise<LandedTake> {
   const landing = beginLanding(root, take);
   const messages: CapturedMessage[] = readFileSync(join(root, take.file), 'utf8')
@@ -385,6 +389,7 @@ export async function landMidiTake(root: string, take: MidiTake): Promise<Landed
 
   const row: RecordedTake = {
     ...sharedRow(landing, Math.round((take.output_latency * landing.trackRate) / take.sample_rate)),
+    started_at_ticks: start - entryTick(landing.node.entry, tempo),
     musical_position: musicalPosition(meter, start),
     sources: take.sources,
   };

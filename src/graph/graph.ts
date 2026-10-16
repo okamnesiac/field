@@ -314,15 +314,15 @@ export function buildGraph(project: LoadedProject): Graph {
           }
           repetitionRefs.set(genRef(name), repetitions.map(genRef));
         } else if (entry.record !== undefined && file.data.instrument !== undefined) {
-          // A chosen MIDI take, from its musical position when it is in
-          // ticks (sequencer.md §2.4); withTakes places the render there,
-          // or, for a take in samples, where it was played.
+          // A chosen MIDI take, from where it starts after its entry when
+          // it is in ticks (sequencer.md §2.4); withTakes places the
+          // render there, or, for a take in samples, where it was played.
           const name = generatorName(entry, file.data.name);
           const take = chosenTake(song.recordTakes.get(name)?.data);
           const notes = take !== undefined ? song.takeNotes.get(take.asset) : undefined;
-          if (take !== undefined && notes !== undefined) {
+          if (take !== undefined && isMidiTakeRow(take) && notes !== undefined) {
             const time = timeOf(file.data);
-            const anchor = notes.data.sample_rate === undefined ? takeAnchor(take, time.meter) : 0;
+            const anchor = notes.data.sample_rate === undefined ? takeAnchor(entry, take, time.tempo) : 0;
             addVoiceRender(name, file.data, { take: take.asset, events: resolveNotes(notes.data, anchor, time) });
           }
         }
@@ -585,9 +585,9 @@ export function buildGraph(project: LoadedProject): Graph {
 // source by that much instead, in the source's own samples, because
 // `source_offset` addresses the source (project-core.md §3.2) and the
 // edge conversion scales it. A MIDI take in ticks (sequencer.md §2.4)
-// sounds from its musical position instead, where its render begins:
-// its notes already have the latency off, and its sample row is a
-// record. The result is an absolute `audio:` entry, so nothing after
+// sounds `started_at_ticks` after the tick the entry's window starts
+// on instead, where its render begins: its notes already have the
+// latency off, and its sample row is a record. The result is an absolute `audio:` entry, so nothing after
 // this point knows recording exists.
 export function withTakes(
   track: Track,
@@ -605,8 +605,8 @@ export function withTakes(
     const window = placedWindow(entry, local.tempo);
     const notes = song.takeNotes.get(take.asset);
     const at =
-      notes !== undefined && notes.data.sample_rate === undefined
-        ? local.tempo.ticksToSamples(takeAnchor(take, local.meter))
+      isMidiTakeRow(take) && notes !== undefined && notes.data.sample_rate === undefined
+        ? local.tempo.ticksToSamples(takeAnchor(entry, take, local.tempo))
         : window.start + take.started_at_samples - take.latency;
     // A MIDI take sounds through its render, the gen node the graph minted
     // for the entry (keyboard-instrument.md §12.3); an audio take is its

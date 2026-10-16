@@ -19,15 +19,27 @@ export function placementAnchor(entry: { anchor: 'musical' | 'absolute'; at: num
   return entry.anchor === 'absolute' ? tempo.samplesToTicks(entry.at) : entry.at;
 }
 
+// The whole tick an entry's window starts on, which a MIDI take's
+// `started_at_ticks` counts from: an absolute entry's sample can fall
+// between ticks, and a take's start is a whole tick.
+export function entryTick(entry: { anchor: 'musical' | 'absolute'; at: number }, tempo: TempoMap): number {
+  return Math.round(placementAnchor(entry, tempo));
+}
+
 // Where a MIDI take in ticks starts on its track (sequencer.md §2.4):
-// its musical_position, in the track's own time, which `field record`
-// wrote from the track's maps.
-export function takeAnchor(take: { musical_position?: number[] | undefined }, meter: MeterMap): number {
-  if (take.musical_position === undefined) {
-    throw new Error('a take in ticks starts at its musical_position, and this row has none');
+// `started_at_ticks` after the tick its record entry's window starts
+// on, so moving the entry moves the take by the same musical distance.
+export function takeAnchor(
+  entry: { anchor: 'musical' | 'absolute'; at: number },
+  take: { started_at_ticks?: number | undefined },
+  tempo: TempoMap,
+): number {
+  if (take.started_at_ticks === undefined) {
+    throw new Error('a take in ticks starts started_at_ticks after its record entry, and this row has none');
   }
-  const [bar = 1, beat, tick] = take.musical_position;
-  return meter.positionTicks(bar, beat, tick);
+  const anchor = entryTick(entry, tempo) + take.started_at_ticks;
+  if (anchor < 0) throw new Error(`it starts ${-anchor} ticks before its track does — move the record entry later`);
+  return anchor;
 }
 
 function musicalMeter(meter: MeterMap | undefined): MeterMap {

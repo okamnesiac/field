@@ -832,18 +832,6 @@ function validate(project: LoadedProject): void {
               push(track.path, `take "${take.asset}" is an audio take, and ${track.data.name} records MIDI for ${instrument}`);
             }
           }
-          // A take in ticks plays from its musical_position (§2.4), so
-          // that position has to exist on the track, and the take has to
-          // resolve from it as a part would.
-          const chosen = chosenTake(takes);
-          const notes = chosen !== undefined ? song.takeNotes.get(chosen.asset) : undefined;
-          if (chosen !== undefined && notes !== undefined && notes.data.sample_rate === undefined && trackTempo && trackMeter) {
-            try {
-              resolveNotes(notes.data, takeAnchor(chosen, trackMeter), { tempo: trackTempo, meter: trackMeter });
-            } catch (err) {
-              push(track.path, `take "${chosen.asset}": ${(err as Error).message}`);
-            }
-          }
         } else if (entry.notes !== undefined) {
           if (instrument === undefined) {
             push(
@@ -875,6 +863,19 @@ function validate(project: LoadedProject): void {
         const pos = positionTicks(track.path, `${what} at`, entry.at, trackMeter);
         if (pos === undefined) return;
         entry.at = pos;
+        // A take in ticks plays from its record entry (§2.4), so it has to
+        // start on the track and resolve from there as a part would.
+        if (entry.record !== undefined && trackTempo && trackMeter) {
+          const chosen = chosenTake(song.recordTakes.get(generatorName(entry, track.data.name))?.data);
+          const notes = chosen !== undefined ? song.takeNotes.get(chosen.asset) : undefined;
+          if (chosen !== undefined && isMidiTakeRow(chosen) && notes !== undefined && notes.data.sample_rate === undefined) {
+            try {
+              resolveNotes(notes.data, takeAnchor(entry, chosen, trackTempo), { tempo: trackTempo, meter: trackMeter });
+            } catch (err) {
+              push(track.path, `take "${chosen.asset}": ${(err as Error).message}`);
+            }
+          }
+        }
         // An *absent* duration is the entry declining to truncate, and has
         // to be told apart from one that failed to resolve: the second
         // already pushed a diagnostic and must skip the checks below,

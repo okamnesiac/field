@@ -96,7 +96,7 @@ describe('voice-render in the graph', () => {
     ]);
   });
 
-  it('places the render at the take\'s musical position, and follows a tempo edit there', async () => {
+  it('places the render where the take started, and follows a tempo edit there', async () => {
     // Half a second into the track, beat 2 at 120 bpm, with 128 samples
     // of output latency: the latency comes off the notes, and the take
     // starts where the capture did.
@@ -117,6 +117,31 @@ describe('voice-render in the graph', () => {
     writeFileSync(songYaml, readFileSync(songYaml, 'utf8').replace('bpm: 120', 'bpm: 60'));
     expect(placedAt()).toEqual([expect.objectContaining({ at: 48000 })]);
     expect(await events()).toMatchObject({ notes: [{ at: 0, length: 24000 - 250, note: 69 }, { at: 24000 - 250 }] });
+  });
+
+  it('moves with its record entry by the same musical distance, and keeps its notes on their beats there', async () => {
+    // Beat 2 of the entry's first bar, at 120 bpm.
+    const landed = await landMidiTake(root, midiTransaction('take-20261010-120200', { started_at_samples: 24000 }));
+    expect(landed.row).toMatchObject({ started_at_samples: 24000, started_at_ticks: 960, musical_position: [1, 2] });
+    const placedAt = (): unknown[] => {
+      const song = loadProject(root).songs.find((s) => s.name === 'creek')!;
+      const track = song.tracks.find((t) => t.data.name === 'keys')!.data;
+      const time = { tempo: new TempoMap(song.time!.tempo, 48000), meter: new MeterMap(song.time!.meter) };
+      return withTakes(track, song, time, 48000, () => 48000).inputs;
+    };
+    const events = async (): Promise<unknown> => ((await explainLabel(root, GEN)).parameters as { events: unknown }).events;
+    const before = await events();
+
+    // Two bars later, the take starts on beat 2 of bar 3, and plays as it did.
+    writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninstrument: pad\ninputs:\n  - record:\n    at: [3]\n');
+    expect(placedAt()).toEqual([expect.objectContaining({ audio: genRef('keys'), at: 2 * 96000 + 24000 })]);
+    expect(await events()).toEqual(before);
+
+    // At 60 bpm a bar is four seconds, and beat 2 is a second into it.
+    const songYaml = join(root, 'songs/creek/song.yaml');
+    writeFileSync(songYaml, readFileSync(songYaml, 'utf8').replace('bpm: 120', 'bpm: 60'));
+    expect(placedAt()).toEqual([expect.objectContaining({ at: 2 * 4 * 48000 + 48000 })]);
+    expect(await events()).toMatchObject({ notes: [{ at: 0, length: 24000, note: 69 }, { at: 24000 }] });
   });
 
   it('plays a take recorded in samples as it was recorded, wherever the tempo goes', async () => {

@@ -427,8 +427,10 @@ reads it back; the device's declared round trip, input plus output
 latency, is recorded beside it, and both are converted into the track's
 rate. A MIDI take lands as a notes file instead,
 `audio/<node>/<take>.notes.yaml`, in ticks from where the take started
-on the track, with the output latency taken off its notes, and its row's
-`musical_position` says where that is in the track's own time
+on the track, with the output latency taken off its notes. Its row's
+`started_at_ticks` counts that start in ticks from the record entry's
+`at`, which is where the take plays from, and `musical_position` says
+where it was in the track's own time
 ([project-model.md](project-model.md) "MIDI takes"). `field record
 --recover <id>` lands what it recovers, and `field record --land <id>`
 lands a finalized transaction nothing landed.

@@ -117,9 +117,15 @@ describe('how long a part is where it is placed', () => {
 });
 
 describe('where a take in ticks starts', () => {
-  it('is its musical position on the track\'s meter', () => {
-    expect(takeAnchor({ musical_position: [2, 3] }, fourFour)).toBe(3840 + 1920);
-    expect(takeAnchor({ musical_position: [3] }, toSevenEight)).toBe(3840 + 3360);
-    expect(() => takeAnchor({}, fourFour)).toThrow('a take in ticks starts at its musical_position, and this row has none');
+  it('is started_at_ticks after the whole tick its record entry starts on', () => {
+    expect(takeAnchor({ anchor: 'musical', at: 3840 }, { started_at_ticks: 1920 }, steady)).toBe(3840 + 1920);
+    // 1.5 ticks in samples falls between ticks; the take counts from the whole one.
+    expect(takeAnchor({ anchor: 'absolute', at: 1.5 * TICK }, { started_at_ticks: 960 }, steady)).toBe(2 + 960);
+    expect(() => takeAnchor({ anchor: 'musical', at: 0 }, {}, steady)).toThrow(
+      'a take in ticks starts started_at_ticks after its record entry, and this row has none',
+    );
+    expect(() => takeAnchor({ anchor: 'musical', at: 0 }, { started_at_ticks: -960 }, steady)).toThrow(
+      'it starts 960 ticks before its track does — move the record entry later',
+    );
   });
 });

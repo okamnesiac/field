@@ -406,6 +406,7 @@ describe('landMidiTake', () => {
     expect(landed.row).toEqual({
       asset: 'take-20261010-100000',
       started_at_samples: 48000,
+      started_at_ticks: 1920,
       musical_position: [1, 3],
       latency: 0,
       sources: ['Field Keys'],
@@ -431,6 +432,23 @@ describe('landMidiTake', () => {
     expect(ledger).toContain('file: audio/keys/take-20261010-100000.notes.yaml');
     expect(existsSync(join(root, '.field/recording/take-20261010-100000'))).toBe(false);
     expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('counts started_at_ticks from the tick its record entry starts on', async () => {
+    createTrack(root, 'creek', 'keys');
+    writeTrack('keys', ['instrument: pad', 'inputs:', '  - record:', '    at: [3]']);
+    // Beat 3 of bar 3 is two beats after the entry's at.
+    const landed = await landAnyTake(
+      root,
+      writeMidiTransaction('take-20261010-100030', { track: '//songs/creek/track:keys', started_at_samples: 2 * 96000 + 48000 }, [
+        { at: 0, midi: [144, 60, 100] },
+        { at: 12000, midi: [128, 60, 0] },
+      ]),
+    );
+    expect(landed).toMatchObject({
+      placedAt: 2 * 96000 + 48000,
+      row: { started_at_samples: 48000, started_at_ticks: 1920, musical_position: [3, 3] },
+    });
   });
 
   it('takes the output latency off every note, and starts a note pressed that early with the take', async () => {
