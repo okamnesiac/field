@@ -1,0 +1,117 @@
+{
+ "version": 1,
+ "name": "Native SDK selection",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 229,
+  "title": "Build native code against the selected toolchain's macOS SDK",
+  "head": "51f2dce904947ca0c2ec748f5ee876e9b3bce73b",
+  "headRef": "native/macos-sdk",
+  "base": "454ab45b6d8e9bd82a0bc2346cde156559e24adf",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field builds its audio daemon and SuperCollider plugin from native C++ code. A macOS update can install a newer SDK, the system headers and libraries used for compilation, beside an older selected Xcode whose linker cannot read it.",
+   "Both builds now choose an SDK before CMake checks the compiler. The shared helper asks the selected toolchain for its macOS SDK and exports that choice for nested builds such as JUCE's build helper."
+  ],
+  "cards": [
+   {
+    "id": "precedence",
+    "title": "SDK selection order",
+    "html": "<ol><li>An explicit <code>CMAKE_OSX_SYSROOT</code> wins.</li><li>Otherwise <code>SDKROOT</code> chooses the SDK.</li><li>With neither, <code>xcrun --sdk macosx --show-sdk-path</code> chooses the selected toolchain’s SDK.</li></ol>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "selection",
+   "title": "Choose the SDK before compiler detection",
+   "kicker": "Shared configuration for both native builds",
+   "intro": [
+    "CMake reads <code>CMAKE_OSX_SYSROOT</code> when <code>project()</code> initializes the compilers. Each native build therefore includes the shared helper first. The helper remembers its own cached selection so later configurations can follow a changed SDK without overwriting a separate user choice."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "native/macos-sdk.cmake",
+     "note": "Resolves the SDK, refreshes its owned cache, and supplies SDKROOT to child processes.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 24,
+       "text": "The owned-cache branch now repeats SDK resolution on reconfigure; a scratch C/C++ probe configured, linked, and reconfigured with SDKROOT=macosx."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt",
+     "note": "Selects the SDK before configuring the audio daemon and JUCE."
+    },
+    {
+     "path": "native/sc-fieldout/CMakeLists.txt",
+     "note": "Selects the SDK before configuring the SuperCollider plugin.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "A scratch configure and build produced FieldOut.scx on macOS with Xcode 27."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "staleness",
+   "title": "Detect SDK-helper changes in build status",
+   "kicker": "Keep the rebuild advice accurate",
+   "intro": [
+    "The installer reports whether tracked native inputs are newer than the audio daemon. It now includes the shared SDK helper, so editing that configuration also tells you to rebuild."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "Adds the shared SDK helper to the existing native-input timestamp check.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 622,
+       "text": "Traced the added path through newer_than: git ls-files includes the tracked helper, and its modification time is compared with the daemon binary."
+      }
+     ]
+    },
+    {
+     "path": "src/install.test.ts",
+     "note": "Extends the existing status regression test with a newer SDK helper.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 899,
+       "text": "The focused installer test passed, including the SDK-helper audiod-stale message."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Explain the build requirement",
+   "kicker": "Installation guidance and incident rationale",
+   "intro": [
+    "The installation guide tells you which SDK the build uses and how to choose another. The install plan records why compiler and SDK selection must agree, including JUCE’s separate helper build."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "Documents SDK selection and includes the shared helper in audiod-stale inputs."
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "Section 10.1 records the toolchain mismatch and the refresh behavior."
+    }
+   ]
+  }
+ ]
+}
