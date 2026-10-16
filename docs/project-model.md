@@ -496,7 +496,12 @@ places the render in the entry's window like any generator's
 ([build-graph.md](build-graph.md) "`voice-render`"). The render is keyed
 on the part's events as they resolve from where the entry places them,
 counted from that point, so a second placement that resolves alike is a
-cache hit, and a tempo edit renders the part again.
+cache hit, and a tempo edit renders the part again. Each repetition of
+a looping entry resolves from where the repetition starts, as the part
+placed there by hand would. Repetitions that resolve alike play one
+render, so a loop in a steady song is one render, and the repetitions
+after a tempo change play `gen:<track>-<n>` or `gen:<track>-<id>-<n>`,
+named for the first repetition `<n>` that plays it.
 
 To edit a take, copy it into a part and place the part at the take's
 `musical_position`. Then mute the record entry, or delete it:

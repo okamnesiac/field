@@ -52,6 +52,7 @@ function edit(path: string, from: string, to: string): void {
 }
 const parameters = async (label: string) => (await explainLabel(root, label)).parameters as Record<string, unknown>;
 const events = async (label: string) => (await parameters(label))['events'] as { notes: { at: number; length: number }[] };
+const inputs = async (label: string) => (await explainLabel(root, label)).inputs.map((i) => i.label);
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-parts-'));
@@ -143,11 +144,39 @@ describe('a placed part', () => {
     expect(outcomes.find((o) => o.label === '//songs/creek/gen:keys-b')).toMatchObject({ cached: true });
   });
 
-  it('repeats at the part\'s length when its loop omits every', async () => {
+  it('repeats at the part\'s length when its loop omits every, from one render in a steady song', async () => {
     writeTrack('keys', ['instrument: pad', 'inputs:', '  - notes: riff', '    at: [1]', '    duration: [8]', '    loop: {}']);
     expect((await check(root)).diagnostics).toEqual([]);
+    expect(await inputs('//songs/creek/track:keys')).toEqual(['//songs/creek/gen:keys']);
     const stem = await parameters('//songs/creek/track:keys');
     expect((stem['clips'] as { start: number }[]).map((c) => c.start)).toEqual([0, 2, 4, 6].map((bar) => bar * 96000));
+  });
+
+  it('resolves each repetition of its loop where the repetition starts, so a tempo change reaches the later ones', async () => {
+    writePart('beat', ['length: [1]', 'notes:', '  - {at: [1, 2], length: [0, 1], note: C3}', 'controls: []', 'bends: []', ''].join('\n'));
+    createTrack(root, 'creek', 'pads');
+    writeTrack('keys', ['instrument: pad', 'inputs:', '  - notes: beat', '    at: [1]', '    duration: [3]', '    loop: {}']);
+    writeTrack('pads', ['instrument: pad', 'inputs:', '  - notes: beat', '    at: [2]']);
+    edit('songs/creek/song.yaml', '      bpm: 120\n', '      bpm: 120\n    - at: 3840\n      bpm: 60\n');
+    expect((await check(root)).diagnostics).toEqual([]);
+    // Beat 2 is half a second into bar 1, at 120 bpm, and a second into
+    // bars 2 and 3, at 60.
+    expect((await events('//songs/creek/gen:keys')).notes.map((n) => n.at)).toEqual([24000]);
+    expect((await events('//songs/creek/gen:keys-2')).notes.map((n) => n.at)).toEqual([48000]);
+    await expect(explainLabel(root, '//songs/creek/gen:keys-3')).rejects.toThrow('no such label');
+    // Repetitions 2 and 3 resolve alike and play one render, the one the
+    // same part placed by hand at bar 2 has.
+    expect(await inputs('//songs/creek/track:keys')).toEqual(['//songs/creek/gen:keys', '//songs/creek/gen:keys-2']);
+    const stem = await parameters('//songs/creek/track:keys');
+    expect(stem['clips']).toEqual([
+      expect.objectContaining({ input: 0, start: 0 }),
+      expect.objectContaining({ input: 1, start: 96000 }),
+      expect.objectContaining({ input: 1, start: 96000 + 4 * 48000 }),
+    ]);
+    const repetition = await explainLabel(root, '//songs/creek/gen:keys-2');
+    expect(repetition.actionKey).toBe((await explainLabel(root, '//songs/creek/gen:pads')).actionKey);
+    await buildLabels(root, ['//songs/creek/track:keys', '//songs/creek/gen:pads'], runner);
+    expect(runs.sort()).toEqual(['keys', 'keys', 'keys-2']);
   });
 
   it('needs ids on two notes entries in one track, as any two generators do', async () => {
@@ -181,6 +210,25 @@ describe('field check on parts', () => {
     writePart('riff', 'notes:\n  - {at: [1, 5], length: [0, 1], note: C3}\n');
     expect((await check(root)).diagnostics.map((d) => d.message)).toEqual([
       'input 1 ("riff") places songs/creek/notes/riff.yaml, which does not resolve there: notes.0.at: beat 5 out of range for 4/4 in bar 1',
+    ]);
+  });
+
+  it('refuses a loop repetition that lands where the part does not resolve', async () => {
+    writePart('riff', 'length: [1]\nnotes:\n  - {at: [1, 4], length: [0, 1], note: C3}\n');
+    writeTrack('keys', ['instrument: pad', 'inputs:', '  - notes: riff', '    at: [1]', '    duration: [3]', '    loop: {every: [1]}']);
+    edit('songs/creek/song.yaml', '      denominator: 4\n', '      denominator: 4\n    - at: 3840\n      numerator: 3\n      denominator: 4\n');
+    expect((await check(root)).diagnostics.map((d) => d.message)).toEqual([
+      'input 1 ("riff") places songs/creek/notes/riff.yaml, which does not resolve at repetition 2 of its loop: notes.0.at: beat 4 out of range for 3/4 in bar 1',
+    ]);
+  });
+
+  it('refuses a generator named as a loop repetition\'s render', async () => {
+    createTrack(root, 'creek', 'keys-2');
+    writeTrack('keys', ['instrument: pad', 'inputs:', '  - notes: riff', '    at: [1]', '    duration: [4]', '    loop: {}']);
+    writeTrack('keys-2', ['instrument: pad', 'inputs:', '  - notes: riff']);
+    edit('songs/creek/song.yaml', '      bpm: 120\n', '      bpm: 120\n    - at: 7680\n      bpm: 60\n');
+    expect((await check(root)).diagnostics.map((d) => `${d.file}: ${d.message}`)).toEqual([
+      'songs/creek/tracks/keys.yaml: repetition 2 of input 1 ("riff") renders as "keys-2", which the generator in songs/creek/tracks/keys-2.yaml also names — rename a track or change an id so each render has a name of its own',
     ]);
   });
 

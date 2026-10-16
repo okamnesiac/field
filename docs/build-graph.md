@@ -285,7 +285,12 @@ whose chosen take is a MIDI take, at `//songs/<song>/gen:<name>` where
 `<name>` is the entry's generator name (keyboard-instrument.md §12.3,
 sequencer.md §2.3). It plays through the track's `instrument:`. Nobody
 declares it. The track places a part's render in the entry's window, as
-any generator's, and a take's render where the take starts.
+any generator's, and a take's render where the take starts. A looping
+part resolves each repetition where the repetition starts, and a
+repetition that resolves differently from every one before it, after a
+tempo or meter change, gets a node of its own, `gen:<name>-<n>`, named
+for its number `<n>`. Repetitions that resolve alike play one node
+(`partRenders` in `src/generators/stem.ts`).
 
 It runs `sc/voice-render.scd` through `sclang`, which loads the
 instrument in voice mode with `sc/voice-load.scd`, as `field keys` loads

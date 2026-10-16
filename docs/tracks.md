@@ -91,7 +91,11 @@ the kind lives in the field name, never in a value prefix:
 A `gen:` node is named by its owning track, or `<track>-<id>` when the
 entry carries an `id` — which is why a track holding two generators
 needs ids on them. A `notes:` entry and a MIDI `record:` entry are
-generators by this rule.
+generators by this rule. A looping `notes:` entry can mint more than
+one: a repetition that resolves differently from every repetition
+before it, as one after a tempo change does, plays a render named for
+its number, `<name>-<n>`, and `check` refuses a generator with that
+name.
 
 ## Placement fields
 

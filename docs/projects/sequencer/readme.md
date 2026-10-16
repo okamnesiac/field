@@ -802,6 +802,19 @@ loosely:
 - **An absolute entry places a part from the tick its sample falls
   on.** Its loop's `every`, when omitted, is the part's length in
   samples, as every absolute time is.
+- **Each repetition of a looping part resolves where it starts.**
+  Loop expansion places a render in each repetition's slot
+  (clip-looping.md decision 6), and each slot plays what the part
+  placed there by hand would: the repetitions start `every` apart in
+  the entry's anchor units (decision 3), and each resolves from its own
+  start. Repetitions that resolve alike play one render, so a loop in a
+  steady song is one render, and the repetitions after a tempo or meter
+  change play their own, `gen:<name>-<n>`, named for the first
+  repetition `<n>` that plays it. `field check` resolves every
+  repetition, so a beat that a later bar lacks is reported, and refuses
+  a generator that has a repetition's render name. `partRenders` in
+  `src/generators/stem.ts` does this for the build, and `field seq`
+  resolves a looping part with it too (§3.5).
 - **Note names** are scientific pitch with `#` or `b`, from `C-1` (0) to
   `G9` (127). A part's file name must be a lowercase slug, the only
   name a `notes:` entry can spell.

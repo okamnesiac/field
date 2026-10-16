@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { readWavHeader } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
-import { entryRef, expandLoop, generatorName, mintsGenerator, placedWindow } from '../generators/stem.js';
+import { entryRef, expandLoop, generatorName, mintsGenerator, partRenders, placedWindow } from '../generators/stem.js';
 import { validateInstrument } from '../generators/voice-render.js';
 import { isSlug } from '../ids.js';
 import { notesFileOrder, notesFileSchema, type NotesFile } from '../schema/notes.js';
@@ -633,6 +633,9 @@ function validate(project: LoadedProject): void {
       string,
       { tempo: TempoMap | undefined; meter: MeterMap | undefined; rate: number }
     >();
+    // The renders a part's later loop repetitions mint (partRenders), so
+    // each can be checked against the generator names once all are known.
+    const repetitionRenders: { name: string; path: string; what: string; repetition: number }[] = [];
     for (const track of song.tracks) {
       // At the track's effective rate (multi-rate.md decision 3): the
       // sample-domain checks below — fade fit, loop expansion — have to
@@ -927,6 +930,18 @@ function validate(project: LoadedProject): void {
           }
           entry.loop.every = every;
         }
+        if (part !== undefined && trackTempo && entry.loop?.enabled) {
+          const name = generatorName(entry, track.data.name);
+          try {
+            const { renders, repetitions } = partRenders(part.data, entry, name, { tempo: trackTempo, meter: trackMeter });
+            for (const render of renders.slice(1)) {
+              repetitionRenders.push({ name: render.name, path: track.path, what, repetition: repetitions.indexOf(render.name) + 1 });
+            }
+          } catch (err) {
+            push(track.path, `${what} places ${part.path}, which does not resolve ${(err as Error).message}`);
+            return;
+          }
+        }
         // Loops are diagnosed here in full — running the same expansion the
         // plan will run — because check is the gate: a check-clean project
         // must never fail to construct its graph (#21 review).
@@ -1068,6 +1083,16 @@ function validate(project: LoadedProject): void {
               `has a name of its own (nested-tracks.md §18)`,
           );
         }
+      }
+    }
+    for (const render of repetitionRenders) {
+      const owner = genNames.get(render.name);
+      if (owner !== undefined) {
+        push(
+          render.path,
+          `repetition ${render.repetition} of ${render.what} renders as "${render.name}", which the ` +
+            `generator in ${owner} also names — rename a track or change an id so each render has a name of its own`,
+        );
       }
     }
 

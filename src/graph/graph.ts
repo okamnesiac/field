@@ -21,14 +21,14 @@ import { chosenTake, committedFileResolver, type LoadedProject, type LoadedSong 
 import type { Cable } from '../model/cables.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import type { ResampleSpec } from '../generators/resample.js';
-import { entryRef, generatorName, placedWindow, planTrack } from '../generators/stem.js';
+import { entryRef, generatorName, partRenders, placedWindow, planTrack } from '../generators/stem.js';
 import {
   indexStateBlobs,
   transportSegments,
   type HostedTrackContext,
   type StateBlob,
 } from '../audio/plugins.js';
-import { placementAnchor, resolveNotes, takeAnchor } from '../time/notes.js';
+import { resolveNotes, takeAnchor } from '../time/notes.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import type { VoiceRenderSpec } from '../generators/voice-render.js';
 import type { Asset, InputEntry, Track } from '../schema/index.js';
@@ -236,6 +236,7 @@ export function buildGraph(project: LoadedProject): Graph {
     // track's own content, so producing it at the project rate only to
     // convert it back at the edge would be a conversion nobody asked for.
     const scEntryRate = new Map<string, number>();
+    const repetitionRefs = new Map<string, string[]>();
     // A track's own maps at its rate (nested-tracks.md §13), which its
     // notes resolve through. Validate refused a song without `time:`.
     const timeOf = (track: Track): TrackTime => ({
@@ -302,14 +303,16 @@ export function buildGraph(project: LoadedProject): Graph {
             sha256BySource.set(genRef(name), variant.sha256);
           }
         } else if (entry.notes !== undefined) {
-          // A part, from where the entry places it; planTrack places the
-          // render in the entry's window, as any generator's.
+          // A part, from where the entry places it and from where each
+          // repetition of its loop starts; planTrack places each
+          // repetition's render in its slot of the entry's window.
           const part = song.parts.get(entry.notes)!;
-          const time = timeOf(file.data);
-          addVoiceRender(generatorName(entry, file.data.name), file.data, {
-            part: part.path,
-            events: resolveNotes(part.data, placementAnchor(entry, time.tempo), time),
-          });
+          const name = generatorName(entry, file.data.name);
+          const { renders, repetitions } = partRenders(part.data, entry, name, timeOf(file.data));
+          for (const render of renders) {
+            addVoiceRender(render.name, file.data, { part: part.path, events: render.events });
+          }
+          repetitionRefs.set(genRef(name), repetitions.map(genRef));
         } else if (entry.record !== undefined && file.data.instrument !== undefined) {
           // A chosen MIDI take, from its musical position when it is in
           // ticks (sequencer.md §2.4); withTakes places the render there,
@@ -496,7 +499,8 @@ export function buildGraph(project: LoadedProject): Graph {
         };
         for (const entry of planned.inputs) {
           if (entry.receive !== undefined) continue; // a cable is not a source here
-          ensureConvert(entryRef(entry, planned.name));
+          const raw = entryRef(entry, planned.name);
+          for (const ref of repetitionRefs.get(raw) ?? [raw]) ensureConvert(ref);
         }
         // The cables arriving here become plan inputs: the sender's stem
         // for a post tap, the tap node for pre — converted at the edge
@@ -533,6 +537,7 @@ export function buildGraph(project: LoadedProject): Graph {
           convertBySource,
           cableIns,
           hosted,
+          repetitionRefs,
         );
       };
       for (const track of renderable) {
