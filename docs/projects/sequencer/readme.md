@@ -70,8 +70,12 @@ drive voices the same way.
    `- notes: riff` with `at: [17]` to `songs/creek/tracks/keys.yaml`,
    whose track names `instrument: pad`.
 2. `field check` validates the part against the notes schema and the
-   entry against its track: the part exists, the track has an
-   instrument, and the instrument's program answers `FIELD_MODE=voice`.
+   entry against its track: the part exists and the track has an
+   instrument. It resolves the instrument's program and checks its knob
+   file. The render and `field keys` report a program that does not
+   answer `FIELD_MODE=voice`, because only `sclang` can tell (corrected
+   2026-10-16: this step had `field check` test that the program
+   answers voice mode; §9).
 3. `field build creek` resolves the part from the entry's anchor
    through the track's time into sample-timed events, renders them
    through `pad` as the `voice-render` node `//songs/creek/gen:keys`,
@@ -111,12 +115,12 @@ drive voices the same way.
 # songs/creek/notes/riff.yaml
 length: [2]
 notes:
-  - { at: [1], length: [0, 1], note: C3, velocity: 110 }
-  - { at: [1, 2], length: [0, 1], note: G3 }
-  - { at: [1, 3], length: 480, note: 60 }
-  - { at: [2], length: [1], note: C2, velocity: 90, channel: 2 }
+  - {at: [1], length: [0, 1], note: C3, velocity: 110}
+  - {at: [1, 2], length: [0, 1], note: G3}
+  - {at: [1, 3], length: 480, note: 60}
+  - {at: [2], length: [1], note: C2, velocity: 90, channel: 2}
 controls:
-  - { at: [1], cc: 74, value: 64 }
+  - {at: [1], cc: 74, value: 64}
 bends: []
 ```
 
@@ -798,14 +802,15 @@ loosely:
   and a part hashed in place, so `field explain` names the part as §4
   asks. A byte copy of a take has the take's hash, which keeps the copy
   on the take's action key. The cost is that an edit to a part's
-  comments or spellings alone renders it again.
+  comments or spellings alone renders it again. Justin accepted this
+  as built on 2026-10-16.
 - **Rows are written without spaces inside the braces.** `field fmt`
   writes `{at: [1], length: [0, 1], note: C3}`, because the emitter pads
   maps and arrays alike or neither, and track files write `[12, 2]`.
-  §2.2's padded example is a valid part that `field check` reports as
-  unformatted until `field fmt` runs. A row never breaks across lines,
+  §2.2's example is spelled that way. A row never breaks across lines,
   however many fields it spells out. `field record` writes takes with the
-  same formatter, so a copied take is already a formatted part.
+  same formatter, so a copied take is already a formatted part. Justin
+  accepted this as built on 2026-10-16.
 - **A musical position counts within the bar it lands in.** `[2, 3]`
   advances one bar from where the part is placed, then two beats, and
   the beat and tick must exist in the meter of that bar. The check runs
@@ -836,7 +841,8 @@ loosely:
   `field keys` uses to sort its shelf would refuse a program whose last
   expression is a SynthDef without reading `FIELD_MODE`. `field check`
   resolves the program and checks its knob file, and the render and
-  `field keys` report a program that has no voice.
+  `field keys` report a program that has no voice. Justin accepted this
+  as built on 2026-10-16, and §2.1 step 2 says so.
 - **Takes in samples render once more.** Their events join the action
   key, and `voice-render` is version 3, so each takes one new render;
   they play as they did.
