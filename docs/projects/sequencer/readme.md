@@ -409,7 +409,7 @@ keyboard-instrument.md §12.1 records: they diff as bytes, and an agent
 cannot quantize or transpose a message stream without pairing its
 note-ons and note-offs first.
 
-### 3.3 One notes format, in ticks (PROPOSED, 2026-10-15, for Justin's decision)
+### 3.3 One notes format, in ticks (DECIDED, 2026-10-15, Justin)
 
 This changes keyboard-instrument.md §12.1, which put takes in samples
 because samples are exact and need no tempo map. With parts in ticks,
@@ -424,7 +424,7 @@ off the grid.
 Takes that carry `sample_rate:` keep playing as they were recorded, so
 no migration rewrites a pinned file.
 
-### 3.4 The instrument is the track's (PROPOSED, 2026-10-15, for Justin's decision)
+### 3.4 The instrument is the track's (DECIDED, 2026-10-15, Justin)
 
 This changes keyboard-instrument.md §12.2, which put `instrument` on
 `record:` because the instrument decides the kind of take. On the
@@ -567,7 +567,8 @@ on each other.
 2. **The engine sends MIDI from a schedule, rather than a clock event
    and a helper** (§3.1). Justin decides. Blocks chunks 4 and 5.
 3. **The instrument moves to the track, and takes land in ticks**
-   (§3.3, §3.4). Justin decides. Blocks chunk 1.
+   (§3.3, §3.4). Decided 2026-10-15 by Justin: the instrument is the
+   track's, and MIDI takes land in ticks.
 4. **Names**: `field seq`, the `notes:` entry, `songs/<song>/notes/`,
    the `Field Seq <song>/<track>` sources, `field sc voice`, and
    `field sc notes`. Justin decides at review. Blocks nothing.
