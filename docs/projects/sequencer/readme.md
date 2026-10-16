@@ -1,5 +1,5 @@
 ---
-status: ready
+status: in-progress
 priority: now
 ---
 
@@ -747,3 +747,82 @@ Read on 2026-10-15, at `566d90c`:
   mode lets each repetition ring over the next.
 - **Nothing overlapped this plan.** No plan under `docs/projects/` and
   no open pull request covered sequencing.
+
+## 9 Notes and parts, as built
+
+Chunks 1 and 2 are built together, on branch `seq-notes`, as the
+bottom layer of a stack of four pull requests: chunks 1 and 2, then 3
+with 6, then 4, then 5. Each chunk alone was too small to be worth a
+review cycle. Chunks 1 and 2 are one argument, notes you write and the
+build that renders them, and chunk 6 is a small `field sc` command that
+rides with the `field sc` library of chunk 3. §6 still lists the chunks
+in the order they depend on each other.
+
+Building them settled these points, which §2 left open or stated
+loosely:
+
+- **A take starts where its capture did.** `field record` takes the
+  output latency off each note, not off the take's start, so a take
+  recorded from bar 17 has `musical_position: [17]` and counts its ticks
+  from there. A note heard before that point, because it was pressed in
+  the take's first moments, starts with the take; a note that ended
+  before it is dropped.
+- **A MIDI take's position is on its track, in the track's own time.**
+  `field record` converts captured times through the recording track's
+  tempo map, which is the song's for every track without `time:` (§2.4
+  says "the song's"), and from the track's zero, as an `at` in that
+  track's file counts. So `musical_position` is the `at` that places a
+  copy of the take as a part on the same track (§2.4). An audio take's
+  `musical_position` stays what the song's map said at capture. A take
+  in ticks plays from `musical_position`, so moving its record entry's
+  `at` no longer moves it; the entry's other placement fields still
+  apply, and a take in samples still moves with the entry.
+- **The render is keyed on events and on the notes file.** A
+  `voice-render` node's parameters are the instrument and `events`, the
+  notes resolved for the placement in samples from its start. The notes
+  file is an input by content hash as well: a take as the ledger source
+  it was, so the build still refuses a take whose pinned bytes changed,
+  and a part hashed in place, so `field explain` names the part as §4
+  asks. A byte copy of a take has the take's hash, which keeps the copy
+  on the take's action key. The cost is that an edit to a part's
+  comments or spellings alone renders it again.
+- **Rows are written without spaces inside the braces.** `field fmt`
+  writes `{at: [1], length: [0, 1], note: C3}`, because the emitter pads
+  maps and arrays alike or neither, and track files write `[12, 2]`.
+  §2.2's padded example is a valid part that `field check` reports as
+  unformatted until `field fmt` runs. A row never breaks across lines,
+  however many fields it spells out. `field record` writes takes with the
+  same formatter, so a copied take is already a formatted part.
+- **A musical position counts within the bar it lands in.** `[2, 3]`
+  advances one bar from where the part is placed, then two beats, and
+  the beat and tick must exist in the meter of that bar. The check runs
+  per placement, because a beat that exists in one placement can be
+  missing in another, and `field check` reports it against the track
+  file whose entry places the part.
+- **An absolute entry places a part from the tick its sample falls
+  on.** Its loop's `every`, when omitted, is the part's length in
+  samples, as every absolute time is.
+- **Note names** are scientific pitch with `#` or `b`, from `C-1` (0) to
+  `G9` (127). A part's file name must be a lowercase slug, the only
+  name a `notes:` entry can spell.
+- **`field check` does not test that the instrument answers voice
+  mode** (§2.1 step 2). Only `sclang` can tell, and the text test
+  `field keys` uses to sort its shelf would refuse a program whose last
+  expression is a SynthDef without reading `FIELD_MODE`. `field check`
+  resolves the program and checks its knob file, and the render and
+  `field keys` report a program that has no voice.
+- **Takes in samples render once more.** Their events join the action
+  key, and `voice-render` is version 3, so each takes one new render;
+  they play as they did.
+
+The first seven rows of §4 pass, each in a test:
+
+| §4 row | Test |
+| --- | --- |
+| A part placed at `[17]` on a track with `instrument: pad` | `src/graph/parts.test.ts`, "renders through the track's instrument, with the part and the instrument as inputs" |
+| A note, the tempo, then `pad` changes | `src/graph/parts.test.ts`, "renders again when a note, the tempo, or the instrument changes" |
+| One part at bars 1 and 17 of a steady song | `src/graph/parts.test.ts`, "is one render where two placements resolve alike" |
+| A part across a change from 4/4 to 7/8 | `src/time/notes.test.ts`, "starts the part's second bar at the bar line after a meter change" |
+| The four `field check` errors | `src/graph/parts.test.ts`, "refuses a notes entry with no instrument, a missing part, a note name that is not one, and an instrument on record:" |
+| A MIDI take, then a tempo edit; a take in samples | `src/commands/land.test.ts`, "writes the take in ticks"; `src/generators/voice-render.test.ts`, "follows a tempo edit there" and "plays a take recorded in samples as it was recorded" |
+| A take copied into a part at its position | `src/graph/parts.test.ts`, "has the take's action key when it is placed at the take's position" |

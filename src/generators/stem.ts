@@ -33,6 +33,18 @@ export function generatorName(entry: InputEntry, owner: string): string {
   return entry.id !== undefined ? `${owner}-${entry.id}` : owner;
 }
 
+// The entries that mint a gen node, and so take a generator name: a
+// render, a request, a record entry, and a part, which renders through
+// the track's instrument.
+export function mintsGenerator(entry: InputEntry): boolean {
+  return (
+    entry.supercollider !== undefined ||
+    entry.generative !== undefined ||
+    entry.record !== undefined ||
+    entry.notes !== undefined
+  );
+}
+
 // The wiring ref an entry contributes to `sources`: kind-in-field in the
 // file (nested-tracks.md §18) flattens to one string here — `audio:`
 // names pass through (bare, or the //shared/asset: label), a `track:`
@@ -43,7 +55,7 @@ export function generatorName(entry: InputEntry, owner: string): string {
 // action key: refs are wiring, and the resolved plan is what hashes.
 export function entryRef(entry: InputEntry, owner: string): string {
   if (entry.track !== undefined) return trackRef(entry.track);
-  if (entry.supercollider !== undefined || entry.generative !== undefined) {
+  if (entry.supercollider !== undefined || entry.generative !== undefined || entry.notes !== undefined) {
     return genRef(generatorName(entry, owner));
   }
   if (entry.record !== undefined) return recordRef(generatorName(entry, owner));
@@ -58,7 +70,7 @@ export function entryLabel(entry: InputEntry): string {
   if (entry.supercollider !== undefined) return 'supercollider';
   if (entry.generative !== undefined) return 'generative';
   if (entry.record !== undefined) return 'record';
-  return entry.track ?? entry.audio ?? '?';
+  return entry.track ?? entry.audio ?? entry.notes ?? '?';
 }
 
 export interface PlacedClip {

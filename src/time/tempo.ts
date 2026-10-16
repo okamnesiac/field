@@ -140,6 +140,10 @@ export class MeterMap {
     return i;
   }
 
+  meterAt(ticks: number): MeterEvent {
+    return this.events[this.segmentFor(ticks)]!;
+  }
+
   // The ordinal position of a tick — [bar, beat, tick], 1-indexed — as
   // numbers, for a writer that needs the array spelling rather than the
   // display string. positionTicks's inverse: for any non-negative

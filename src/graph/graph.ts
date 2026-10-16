@@ -28,7 +28,9 @@ import {
   type HostedTrackContext,
   type StateBlob,
 } from '../audio/plugins.js';
-import { TempoMap } from '../time/tempo.js';
+import { placementAnchor, resolveNotes, takeAnchor } from '../time/notes.js';
+import { MeterMap, TempoMap } from '../time/tempo.js';
+import type { VoiceRenderSpec } from '../generators/voice-render.js';
 import type { Asset, InputEntry, Track } from '../schema/index.js';
 import { isHostedInsert, isMidiTakeRow } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -88,6 +90,12 @@ export interface GenerationNode {
 }
 
 export type GraphNode = AssetNode | GeneratorNode | GenerationNode;
+
+// A track's own maps, at its rate.
+export interface TrackTime {
+  tempo: TempoMap;
+  meter: MeterMap;
+}
 
 export interface Graph {
   nodes: Map<string, GraphNode>; // keyed by formatted label
@@ -228,6 +236,28 @@ export function buildGraph(project: LoadedProject): Graph {
     // track's own content, so producing it at the project rate only to
     // convert it back at the edge would be a conversion nobody asked for.
     const scEntryRate = new Map<string, number>();
+    // A track's own maps at its rate (nested-tracks.md §13), which its
+    // notes resolve through. Validate refused a song without `time:`.
+    const timeOf = (track: Track): TrackTime => ({
+      tempo: new TempoMap(track.time?.tempo ?? song.time!.tempo, trackRate(track)),
+      meter: new MeterMap(track.time?.meter ?? song.time!.meter),
+    });
+    // Notes render through the track's instrument at the track's rate
+    // (sequencer.md §2.3), keyed on the events they resolve to.
+    const addVoiceRender = (
+      name: string,
+      track: Track,
+      notes: Pick<VoiceRenderSpec, 'take' | 'part' | 'events'>,
+    ): void => {
+      scEntryRate.set(name, trackRate(track));
+      addRule(
+        { pkg: `${pkgBase}/gen`, name },
+        song.dir,
+        { name, type: 'voice-render', instrument: track.instrument!, ...notes },
+        refLabel,
+        trackRate(track),
+      );
+    };
     for (const file of song.tracks) {
       for (const entry of file.data.inputs) {
         if (entry.supercollider !== undefined) {
@@ -271,21 +301,26 @@ export function buildGraph(project: LoadedProject): Graph {
             });
             sha256BySource.set(genRef(name), variant.sha256);
           }
-        } else if (entry.record?.instrument !== undefined) {
-          // A chosen MIDI take renders through the entry's instrument at
-          // the track's rate (keyboard-instrument.md §12.3), and withTakes
-          // places the render where the take was played.
+        } else if (entry.notes !== undefined) {
+          // A part, from where the entry places it; planTrack places the
+          // render in the entry's window, as any generator's.
+          const part = song.parts.get(entry.notes)!;
+          const time = timeOf(file.data);
+          addVoiceRender(generatorName(entry, file.data.name), file.data, {
+            part: part.path,
+            events: resolveNotes(part.data, placementAnchor(entry, time.tempo), time),
+          });
+        } else if (entry.record !== undefined && file.data.instrument !== undefined) {
+          // A chosen MIDI take, from its musical position when it is in
+          // ticks (sequencer.md §2.4); withTakes places the render there,
+          // or, for a take in samples, where it was played.
           const name = generatorName(entry, file.data.name);
           const take = chosenTake(song.recordTakes.get(name)?.data);
-          if (take !== undefined && isMidiTakeRow(take)) {
-            scEntryRate.set(name, trackRate(file.data));
-            addRule(
-              { pkg: `${pkgBase}/gen`, name },
-              song.dir,
-              { name, type: 'voice-render', take: take.asset, instrument: entry.record.instrument },
-              refLabel,
-              trackRate(file.data),
-            );
+          const notes = take !== undefined ? song.takeNotes.get(take.asset) : undefined;
+          if (take !== undefined && notes !== undefined) {
+            const time = timeOf(file.data);
+            const anchor = notes.data.sample_rate === undefined ? takeAnchor(take, time.meter) : 0;
+            addVoiceRender(name, file.data, { take: take.asset, events: resolveNotes(notes.data, anchor, time) });
           }
         }
       }
@@ -424,7 +459,8 @@ export function buildGraph(project: LoadedProject): Graph {
         // the ledger, so downstream it is an `audio:` placement like any
         // other, at the position it was sung. An entry with no chosen
         // take contributes nothing — silence (§4).
-        const planned = withTakes(track, song, local, rate, sourceRate);
+        const meter = new MeterMap(track.time?.meter ?? songMeterEvents);
+        const planned = withTakes(track, song, { tempo: local, meter }, rate, sourceRate);
         // Rates convert at the placement (multi-rate.md decision 4): a
         // source arriving at another rate gets a resample node between it
         // and this stem, named for the source and the rate it becomes —
@@ -543,12 +579,15 @@ export function buildGraph(project: LoadedProject): Graph {
 // that started before the window (a negative placement) reads into its
 // source by that much instead, in the source's own samples, because
 // `source_offset` addresses the source (project-core.md §3.2) and the
-// edge conversion scales it. The result is an absolute `audio:` entry,
-// so nothing after this point knows recording exists.
+// edge conversion scales it. A MIDI take in ticks (sequencer.md §2.4)
+// sounds from its musical position instead, where its render begins:
+// its notes already have the latency off, and its sample row is a
+// record. The result is an absolute `audio:` entry, so nothing after
+// this point knows recording exists.
 export function withTakes(
   track: Track,
   song: LoadedSong,
-  local: TempoMap,
+  local: TrackTime,
   trackRate: number,
   sourceRate: (ref: string) => number | undefined,
 ): Track {
@@ -558,8 +597,12 @@ export function withTakes(
     const name = generatorName(entry, track.name);
     const take = chosenTake(song.recordTakes.get(name)?.data);
     if (take === undefined) return [];
-    const window = placedWindow(entry, local);
-    const at = window.start + take.started_at_samples - take.latency;
+    const window = placedWindow(entry, local.tempo);
+    const notes = song.takeNotes.get(take.asset);
+    const at =
+      notes !== undefined && notes.data.sample_rate === undefined
+        ? local.tempo.ticksToSamples(takeAnchor(take, local.meter))
+        : window.start + take.started_at_samples - take.latency;
     // A MIDI take sounds through its render, the gen node the graph minted
     // for the entry (keyboard-instrument.md §12.3); an audio take is its
     // own bytes.
