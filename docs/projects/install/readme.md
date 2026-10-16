@@ -972,10 +972,13 @@ building it found.
   selected developer directory. `native/macos-sdk.cmake`, which both
   native builds include before `project()`, sets `CMAKE_OSX_SYSROOT` to
   that answer and exports it as `SDKROOT`, because JUCE configures
-  `juceaide` in a CMake of its own that is given no sysroot. `SDKROOT`,
-  or a `CMAKE_OSX_SYSROOT` someone set, wins, and the SDK is asked for
-  at every configure, so a checkout's build directory follows a later
-  Xcode update.
+  `juceaide` in a CMake of its own that is given no sysroot. A
+  `CMAKE_OSX_SYSROOT` someone set wins, and then `SDKROOT`, which `xcrun`
+  resolves whether it is a path or an SDK's name. The SDK is resolved
+  at every configure, so a build directory follows `SDKROOT` or a later
+  Xcode update: CMake passes the cached value as `-isysroot`, which the
+  compiler prefers to `SDKROOT`, so a cache that kept the first answer
+  would ignore both.
 
 ### 10.2 What was verified, and how
 

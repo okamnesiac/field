@@ -10,18 +10,25 @@
 # (install.md §10.1). `xcrun --sdk macosx` answers within the selected
 # developer directory instead.
 #
-# SDKROOT, or a CMAKE_OSX_SYSROOT someone set, wins. The SDK is asked for
-# again at every configure, so an existing build directory follows a
-# later Xcode update or xcode-select switch; FIELD_OSX_SYSROOT remembers
-# which value was this file's to replace.
+# A CMAKE_OSX_SYSROOT someone set wins, and then SDKROOT, which xcrun
+# resolves whether it names a path or an SDK. The SDK is resolved again
+# at every configure, so an existing build directory follows SDKROOT, a
+# later Xcode update, or an xcode-select switch: CMake passes the cached
+# value as -isysroot, which the compiler prefers to SDKROOT.
+# FIELD_OSX_SYSROOT remembers which value was this file's to replace.
 #
 # The SDK goes into SDKROOT too, for the processes configure starts:
 # JUCE configures and builds juceaide in a CMake of its own, which is
 # given no CMAKE_OSX_SYSROOT and would ask xcrun again.
-if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{SDKROOT})
+if(CMAKE_HOST_APPLE)
   if(NOT CMAKE_OSX_SYSROOT OR CMAKE_OSX_SYSROOT STREQUAL "${FIELD_OSX_SYSROOT}")
+    if(DEFINED ENV{SDKROOT} AND NOT "$ENV{SDKROOT}" STREQUAL "")
+      set(field_sdk_query xcrun --show-sdk-path)
+    else()
+      set(field_sdk_query xcrun --sdk macosx --show-sdk-path)
+    endif()
     execute_process(
-      COMMAND xcrun --sdk macosx --show-sdk-path
+      COMMAND ${field_sdk_query}
       OUTPUT_VARIABLE field_sdk
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
@@ -31,7 +38,7 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{SDKROOT})
       set(FIELD_OSX_SYSROOT "${field_sdk}" CACHE INTERNAL "")
     endif()
   endif()
-  if(CMAKE_OSX_SYSROOT)
+  if(CMAKE_OSX_SYSROOT AND NOT DEFINED ENV{SDKROOT})
     set(ENV{SDKROOT} "${CMAKE_OSX_SYSROOT}")
   endif()
 endif()
