@@ -461,14 +461,22 @@ doing rather than merely copying:
   [ace-generation.md](../ace-generation/readme.md) worker protocol. Recorded and sung
   material is where a model earns its place; a clean loop often does not need
   one.
-- **Conforming — move it** — is a transform, and **the model is the default
-  path for it, not the fallback** (decided 2026-08-21). Sequenced material is
-  the one case where conforming is arithmetic — transpose the notes and you
-  are done — but Field's material is overwhelmingly recorded and generated
-  audio rather than sequences, so the arithmetic case is the rare one. Both
-  transposition and time-stretch go through the model, with the note-level
-  correction layer in §5 applied against the immutable take. Designing around
-  the sequenced case would be optimising for the exception.
+- **Conforming — move it** — is a transform, and it takes one of two paths by
+  the kind of material (decided 2026-08-21, corrected 2026-10-15). **For
+  audio, the model is the default path, not the fallback.** Both
+  transposition and time-stretch go through it, with the note-level
+  correction layer in §5 applied against the immutable take. **A sequenced
+  part conforms by arithmetic**: transpose its notes and you are done, and it
+  needs no time-stretch, because its notes follow the tempo map
+  ([sequencer](../sequencer/readme.md)).
+
+  The 2026-08-21 version sent all material through the model, on the premise
+  that "Field's material is overwhelmingly recorded and generated audio rather
+  than sequences, so the arithmetic case is the rare one", and called
+  designing around sequences "optimising for the exception". Justin corrected
+  that premise on 2026-10-15. It described the order Field was built in,
+  which began with recording and generation, not the music Field is for.
+  Written parts are first-class material beside recorded and generated audio.
 
 Two consequences worth writing down now:
 
