@@ -1,0 +1,84 @@
+{
+ "version": 1,
+ "name": "Written parts and live sequencing",
+ "project": "sequencer",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 232,
+  "title": "Plan the sequencer: written parts, field seq, and MIDI the engine sends on time",
+  "head": "9e2e2679faf385fa8c16d195a04d6218f2c1a28a",
+  "headRef": "plan-sequencer",
+  "base": "c7a95e1ec72acbf33666f8372b756930f0475a53",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field records performed notes as immutable MIDI takes and renders them to audio. This draft adds a plan for parts you can write, edit, generate, and place in a song. Musical timing lets those notes follow tempo edits.",
+   "The build and a new <code>field seq</code> command share one resolver that turns notes into sample times. The audio daemon sends scheduled MIDI; SuperCollider voices turn those messages into sound. This pull request changes plans only."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms in this plan",
+    "html": "<ul><li><b>Part:</b> an editable notes file placed on a track.</li><li><b>Take:</b> a recorded performance whose bytes the ledger pins.</li><li><b>Voice:</b> a running instrument that receives MIDI and produces audio.</li><li><b>Schedule:</b> MIDI messages with sample positions on the song timeline.</li></ul>"
+   },
+   {
+    "id": "decisions",
+    "title": "Decisions remain with Justin",
+    "html": "The new plan stays <code>draft</code>. Separate part files, daemon MIDI scheduling, takes in ticks, and instruments on tracks remain proposed. Names await review; editing tools, shared parts, plugin instruments, and Windows support remain deferred."
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "sequencer",
+   "title": "Write parts and play them live",
+   "kicker": "One notes format feeds both rendered audio and live instruments.",
+   "intro": [
+    "A part is an editable file of notes in musical time. Placing it on a track gives it an instrument and an anchor in the arrangement. Recorded MIDI takes adopt ticks too, while older sample-timed takes keep their existing playback.",
+    "For live playback, <code>field seq</code> resolves the arrangement into sample-timed MIDI messages. The daemon sends them against its audio clock, and a shared voice library hosts the instruments. An open <code>seq:</code> input suppresses the matching rendered notes so you hear one performance.",
+    "The six rollout chunks separate the notes format, parts, voice library, MIDI outputs, sequencer command, and pattern-to-part command. The plan also states the live path’s limits: different placement mixes cannot be preserved individually, release tails can ring, notes under a locate stay silent, and the initial lead can be late."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/sequencer/readme.md",
+     "collapsed": false,
+     "note": "Read the workflows and contracts in §2, the proposed decisions in §3, and the acceptance and rollout tables in §§4–7.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 2,
+       "text": "Confirmed with project list and project show that this plan is draft; its explicit open decisions do not claim implementation readiness."
+      },
+      {
+       "kind": "context",
+       "line": 539,
+       "text": "Each rollout chunk is a separate pull request. The notes format, voice extraction, and engine output chunks can start independently after their relevant decisions are settled."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "conforming",
+   "title": "Choose the transform by material",
+   "kicker": "Written notes transpose directly; audio keeps the model path.",
+   "intro": [
+    "Conforming means moving imported material into the song’s key. Written notes already expose their pitches, so transposing them is arithmetic. Audio still needs the planned model transform.",
+    "The feature catalogue records why the earlier all-material model premise changed, and the key-conforming project’s goal adopts the same distinction. Neither project advances from draft."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/daw-features/readme.md",
+     "note": "Section 15 corrects the premise that sequenced material is an exception, preserving the reason for the decision change."
+    },
+    {
+     "path": "docs/projects/key-conforming/readme.md",
+     "note": "The goal now distinguishes transposing parts from transforming recorded audio."
+    }
+   ]
+  }
+ ]
+}
